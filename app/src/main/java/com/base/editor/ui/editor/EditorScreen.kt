@@ -203,7 +203,8 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
             CaptionOverlay(CaptionOps.captionAt(captionItems, playhead), captionStyle, playhead, vm.videoAspect)
             // свободные жесты: перемещение / масштаб / поворот выделенного клипа или текста
             val canvasText by vm.canvasTextId.collectAsStateWithLifecycle()
-            val target = remember(selected, canvasText, draft, texts, liveClip, playhead, clips) { vm.canvasTarget() }
+            val clipAspects by vm.clipAspects.collectAsStateWithLifecycle()
+            val target = remember(selected, canvasText, draft, texts, liveClip, playhead, clips, clipAspects) { vm.canvasTarget() }
             CanvasTransformOverlay(vm.videoAspect, target, visibleTexts, vm)
         }
 

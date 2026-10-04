@@ -33,7 +33,7 @@ import kotlin.math.abs
 /** Что сейчас выделено на холсте. */
 sealed interface CanvasTarget {
     /** Видео/фото клип: его кадр можно двигать, масштабировать и вращать. */
-    data class Clip(val id: Long, val transform: ClipTransform) : CanvasTarget
+    data class Clip(val id: Long, val transform: ClipTransform, val aspect: Float) : CanvasTarget
     data class Text(val clip: TextClip, val isDraft: Boolean) : CanvasTarget
 }
 
@@ -117,12 +117,21 @@ fun CanvasTransformOverlay(
                     drawSelection(Offset(b.centerX, b.centerY), b.width, b.height, b.rotationDeg)
                 }
                 is CanvasTarget.Clip -> {
+                    // рамка строго по вписанному кадру клипа (ContentScale.Fit), а не по всему холсту;
+                    // масштаб и поворот идут вокруг центра кадра, как в MultiTouchListener (PhotoEditor)
                     val c = t.transform
-                    drawSelection(Offset(size.width / 2 + c.x * size.width, size.height / 2 + c.y * size.height), size.width * c.scale, size.height * c.scale, c.rotationDeg)
+                    val (fw, fh) = fitSize(size.width, size.height, t.aspect)
+                    drawSelection(Offset(size.width / 2 + c.x * size.width, size.height / 2 + c.y * size.height), fw * c.scale, fh * c.scale, c.rotationDeg)
                 }
             }
         }
     }
+}
+
+/** Размер кадра с соотношением [aspect], вписанного в холст w×h без растяжения (ContentScale.Fit). */
+internal fun fitSize(w: Float, h: Float, aspect: Float): Pair<Float, Float> {
+    val a = aspect.coerceIn(0.05f, 20f)
+    return if (a >= w / h) w to w / a else h * a to h
 }
 
 private fun hitText(measurer: TextMeasurer, texts: List<TextClip>, p: Offset, size: Size, density: androidx.compose.ui.unit.Density): String? {

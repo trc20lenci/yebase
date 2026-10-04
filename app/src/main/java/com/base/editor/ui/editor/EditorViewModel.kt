@@ -233,6 +233,18 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     }
 
     // ───────── жесты на холсте ─────────
+    /** Реальные пропорции исходников (по uri); нужны, чтобы рамка выделения совпадала с вписанным кадром. */
+    val clipAspects = MutableStateFlow<Map<String, Float>>(emptyMap())
+    private val aspectRequested = HashSet<String>()
+    private fun loadClipAspect(c: Clip) {
+        if (!aspectRequested.add(c.uri)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            MediaProbe.displaySize(getApplication(), c.uri, c.type)?.let { (w, h) ->
+                clipAspects.update { it + (c.uri to w.toFloat() / h) }
+            }
+        }
+    }
+
     /** Что выделено на холсте: слой текста (черновик имеет приоритет) или клип под курсором. */
     fun canvasTarget(): CanvasTarget? {
         textDraft.value?.let { return CanvasTarget.Text(it.clip, isDraft = true) }
@@ -240,7 +252,8 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         val id = selectedId.value ?: return null
         val clip = clips.value.firstOrNull { it.id == id && playheadMs.value >= it.startMs && playheadMs.value < it.endMs } ?: return null
         val live = liveClipTransform.value?.takeIf { it.id == id }?.current
-        return CanvasTarget.Clip(id, live ?: controller.state.value.transformOf(id))
+        val aspect = clipAspects.value[clip.uri] ?: videoAspect.also { loadClipAspect(clip) }
+        return CanvasTarget.Clip(id, live ?: controller.state.value.transformOf(id), aspect)
     }
 
     override fun onGestureStart() { controller.beginEdit() }
