@@ -45,7 +45,7 @@ object TextClipRenderer {
         val padY = if (clip.hasBackground) fontPx * 0.25f else 0f
         val layout = measurer.measure(
             AnnotatedString(clip.text),
-            TextStyle(fontSize = fontPx.toSp(), fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
+            TextStyle(fontSize = fontPx.toSp(), fontFamily = TextFonts.family(clip.fontId), fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
             softWrap = true,
             constraints = Constraints(maxWidth = max(1, (maxW - padX * 2).toInt())),
             layoutDirection = layoutDirection, density = this,

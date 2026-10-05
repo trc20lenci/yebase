@@ -12,10 +12,20 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.DeleteOutline
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Palette
+import androidx.compose.material.icons.rounded.TextFields
+import androidx.compose.material.icons.rounded.VerticalSplit
+import androidx.compose.material3.Icon
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
@@ -25,8 +35,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
@@ -55,72 +63,107 @@ private val TextPalette = listOf(
 )
 
 /**
- * Редактор текстового слоя в нижнем окне. Это отдельное окно (Dialog): клавиатура и анимация появления
- * не пересчитывают размеры экрана редактора, а видео остаётся видимым над панелью (затемнения нет),
- * так что изменения цвета, размера и положения видны сразу.
+ * Строка ввода текста: небольшое окно у нижнего края (не модальное по касаниям выше него, без затемнения).
+ * Клавиатура не пересчитывает размеры экрана редактора. Всё остальное — в нижней панели [TextContextPanel].
  */
 @Composable
-fun TextEditorSheet(
-    clip: TextClip, isNew: Boolean,
-    onChange: ((TextClip) -> TextClip) -> Unit,
-    templates: List<com.base.editor.pag.PagTemplateStore.Template>, onImportPag: (android.net.Uri) -> Unit,
-    onDone: () -> Unit, onDelete: () -> Unit, onCancel: () -> Unit,
-) {
-    Dialog(onDismissRequest = onCancel, properties = DialogProperties(dismissOnClickOutside = false, usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
+fun TextInputSheet(text: String, onChange: (String) -> Unit, onDone: () -> Unit) {
+    Dialog(onDismissRequest = onDone, properties = DialogProperties(dismissOnClickOutside = false, usePlatformDefaultWidth = false, decorFitsSystemWindows = false)) {
         val window = (LocalView.current.parent as? DialogWindowProvider)?.window
         LaunchedEffect(window) {
             window?.apply {
                 setGravity(Gravity.BOTTOM)
                 setDimAmount(0f)
-                // касания выше панели уходят в редактор: текст можно двигать, масштабировать и вращать на холсте при открытой панели
                 setFlags(WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL, WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL)
                 setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING)
                 setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.WRAP_CONTENT)
             }
         }
         val focus = remember { FocusRequester() }
-        LaunchedEffect(Unit) { if (isNew) runCatching { focus.requestFocus() } }
-
-        Column(
+        LaunchedEffect(Unit) { runCatching { focus.requestFocus() } }
+        Row(
             Modifier.fillMaxWidth().clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)).background(BaseColors.DarkPanel)
-                .imePadding().navigationBarsPadding().heightIn(max = 420.dp).verticalScroll(rememberScrollState()).padding(16.dp),
+                .imePadding().navigationBarsPadding().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
         ) {
             OutlinedTextField(
-                value = clip.text, onValueChange = { v -> onChange { it.copy(text = v) } },
-                modifier = Modifier.fillMaxWidth().focusRequester(focus), placeholder = { Text("Введите текст") }, minLines = 1, maxLines = 3,
+                value = text, onValueChange = onChange,
+                modifier = Modifier.weight(1f).focusRequester(focus), placeholder = { Text("Введите текст") }, minLines = 1, maxLines = 3,
             )
+            Text("Готово", Modifier.padding(start = 10.dp).clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).clickable(onClick = onDone).padding(horizontal = 18.dp, vertical = 12.dp),
+                color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
 
-            Label("Анимация титра")
-            val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) onImportPag(uri) }
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                item { PagChip("Без анимации", clip.pagTemplate == null) { onChange { it.copy(pagTemplate = null) } } }
-                items(templates, key = { it.ref }) { t -> PagChip(t.title, clip.pagTemplate == t.ref) { onChange { it.copy(pagTemplate = t.ref) } } }
-                item { PagChip("+ Свой .pag", false) { picker.launch(arrayOf("*/*")) } }
+private enum class TextSub { FONTS, STYLE }
+
+/**
+ * Контекстная нижняя панель текстового слоя (как у медиафайлов): «Текст», «Разделить», «Шрифты», «Стиль/Цвет», «Удалить».
+ * Размер, положение и поворот меняются жестами на холсте, длительность — краями блока на таймлайне, поэтому числовых полей нет.
+ */
+@Composable
+fun TextContextPanel(
+    clip: TextClip, isNew: Boolean,
+    onChange: ((TextClip) -> TextClip) -> Unit,
+    templates: List<com.base.editor.pag.PagTemplateStore.Template>, onImportPag: (android.net.Uri) -> Unit,
+    onEditText: () -> Unit, onSplit: () -> Unit, onDelete: () -> Unit, onDone: () -> Unit,
+) {
+    var sub by remember { mutableStateOf<TextSub?>(null) }
+    Column(Modifier.fillMaxWidth().background(BaseColors.DarkPanel).padding(horizontal = 12.dp, vertical = 8.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(when (sub) { TextSub.FONTS -> "Шрифты"; TextSub.STYLE -> "Стиль и цвет"; null -> "Текст" }, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            if (sub != null) Text("Назад", Modifier.clip(RoundedCornerShape(10.dp)).clickable { sub = null }.padding(horizontal = 12.dp, vertical = 8.dp), color = Color.White.copy(alpha = .8f), fontSize = 14.sp)
+            Text("Готово", Modifier.clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).clickable(onClick = onDone).padding(horizontal = 18.dp, vertical = 8.dp),
+                color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        }
+        when (sub) {
+            null -> Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+                PanelAction("Текст", Icons.Rounded.Edit, onEditText)
+                PanelAction("Разделить", Icons.Rounded.VerticalSplit, onSplit, enabled = !isNew)
+                PanelAction("Шрифты", Icons.Rounded.TextFields) { sub = TextSub.FONTS }
+                PanelAction("Стиль/Цвет", Icons.Rounded.Palette) { sub = TextSub.STYLE }
+                PanelAction("Удалить", Icons.Rounded.DeleteOutline, onDelete)
             }
-
-            Label("Цвет текста")
-            ColorChips(clip.textColor) { c -> onChange { it.copy(textColor = c) } }
-
-            Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text("Фон под текстом", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                Switch(clip.hasBackground, { on -> onChange { it.copy(backgroundColor = if (on) 0xCC000000 else 0L) } },
-                    colors = SwitchDefaults.colors(checkedTrackColor = BaseColors.Cyan, checkedThumbColor = Color.Black))
+            TextSub.FONTS -> LazyRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                items(com.base.editor.text.TextFonts.all, key = { it.id }) { f ->
+                    val on = clip.fontId == f.id
+                    Box(
+                        Modifier.clip(RoundedCornerShape(12.dp)).background(if (on) BaseColors.Cyan else BaseColors.DarkSlot)
+                            .clickable { onChange { it.copy(fontId = f.id) } }.padding(horizontal = 16.dp, vertical = 12.dp),
+                    ) { Text("Аа Яя", color = if (on) Color.Black else Color.White, fontSize = 20.sp, fontFamily = f.family) }
+                }
             }
-            if (clip.hasBackground) ColorChips(clip.backgroundColor or 0xFF000000) { c -> onChange { it.copy(backgroundColor = 0xCC000000 or (c and 0xFFFFFF)) } }
-
-            SliderRow("Размер", clip.fontSizeSp, 12f..96f, "${clip.fontSizeSp.toInt()}") { v -> onChange { it.copy(fontSizeSp = v) } }
-            SliderRow("Длительность", clip.durationMs.toFloat(), TextClip.MIN_DURATION_MS.toFloat()..10_000f, "%.1f с".format(clip.durationMs / 1000f)) { v -> onChange { it.copy(durationMs = (v / 100).toLong() * 100) } }
-            SliderRow("По горизонтали", clip.positionX, 0f..1f, "${(clip.positionX * 100).toInt()}%") { v -> onChange { it.copy(positionX = v) } }
-            SliderRow("По вертикали", clip.positionY, 0f..1f, "${(clip.positionY * 100).toInt()}%") { v -> onChange { it.copy(positionY = v) } }
-
-            Row(Modifier.fillMaxWidth().padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
-                if (!isNew) Text("Удалить", Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onDelete).padding(horizontal = 14.dp, vertical = 10.dp), color = Color(0xFFFF8A80), fontSize = 15.sp)
-                Spacer(Modifier.weight(1f))
-                Text("Отмена", Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onCancel).padding(horizontal = 14.dp, vertical = 10.dp), color = Color.White.copy(alpha = .8f), fontSize = 15.sp)
-                Text("Готово", Modifier.padding(start = 6.dp).clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).clickable(onClick = onDone).padding(horizontal = 22.dp, vertical = 10.dp),
-                    color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            TextSub.STYLE -> Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
+                Label("Цвет текста")
+                ColorChips(clip.textColor) { c -> onChange { it.copy(textColor = c) } }
+                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("Фон под текстом", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                    Switch(clip.hasBackground, { on -> onChange { it.copy(backgroundColor = if (on) 0xCC000000 else 0L) } },
+                        colors = SwitchDefaults.colors(checkedTrackColor = BaseColors.Cyan, checkedThumbColor = Color.Black))
+                }
+                if (clip.hasBackground) ColorChips(clip.backgroundColor or 0xFF000000) { c -> onChange { it.copy(backgroundColor = 0xCC000000 or (c and 0xFFFFFF)) } }
+                Label("Анимация титра")
+                val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) onImportPag(uri) }
+                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    item { PagChip("Без анимации", clip.pagTemplate == null) { onChange { it.copy(pagTemplate = null) } } }
+                    items(templates, key = { it.ref }) { t -> PagChip(t.title, clip.pagTemplate == t.ref) { onChange { it.copy(pagTemplate = t.ref) } } }
+                    item { PagChip("+ Свой .pag", false) { picker.launch(arrayOf("*/*")) } }
+                }
             }
         }
+    }
+}
+
+@Composable
+private fun PanelAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, enabled: Boolean = true) {
+    Column(
+        Modifier.clip(RoundedCornerShape(12.dp)).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Icon(icon, label, tint = Color.White.copy(alpha = if (enabled) 1f else .35f), modifier = Modifier.size(26.dp))
+        Text(label, color = Color.White.copy(alpha = if (enabled) .85f else .35f), fontSize = 11.sp, maxLines = 1)
     }
 }
 
@@ -142,12 +185,3 @@ private fun ColorChips(selected: Long, onPick: (Long) -> Unit) {
     }
 }
 
-@Composable
-private fun SliderRow(label: String, value: Float, range: ClosedFloatingPointRange<Float>, shown: String, onChange: (Float) -> Unit) {
-    Row(verticalAlignment = Alignment.CenterVertically) {
-        Text(label, color = Color.White.copy(alpha = .75f), fontSize = 13.sp, modifier = Modifier.width(112.dp))
-        Slider(value.coerceIn(range.start, range.endInclusive), onChange, valueRange = range, modifier = Modifier.weight(1f),
-            colors = SliderDefaults.colors(thumbColor = BaseColors.Cyan, activeTrackColor = BaseColors.Cyan))
-        Text(shown, color = Color.White, fontSize = 12.sp, modifier = Modifier.width(48.dp))
-    }
-}

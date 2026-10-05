@@ -25,6 +25,8 @@ data class TextClip(
     val rotationDeg: Float = 0f,
     /** Имя анимированного шаблона титра (.pag) или null — обычный текст. */
     val pagTemplate: String? = null,
+    /** Шрифт из [TextFonts]. */
+    val fontId: String = "MONTSERRAT",
 ) {
     val endMs get() = startMs + durationMs
     val hasBackground get() = (backgroundColor ushr 24) > 0L

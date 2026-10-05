@@ -113,6 +113,8 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     val captionPanelOpen = MutableStateFlow(false)
     /** Текст, который сейчас редактируется (новый или существующий). */
     val textDraft = MutableStateFlow<TextDraft?>(null)
+    /** true — открыта строка ввода текста (клавиатура); false — показана нижняя панель инструментов текста. */
+    val textInputOpen = MutableStateFlow(false)
     private val pagStore = PagTemplateStore(app)
     /** Шаблоны анимированных титров (.pag): встроенные и импортированные пользователем. */
     val pagTemplates = MutableStateFlow(pagStore.list())
@@ -123,6 +125,11 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     val texts get() = controller.texts
     val editingCaptionId = MutableStateFlow<String?>(null)
     val videoAspect get() = controller.canvas.let { it.width.toFloat() / it.height }
+    /**
+     * Пропорции окна предпросмотра. Меняются только когда плеер показал композицию нового формата, поэтому окно
+     * не «схлопывается» в промежутке пересборки; сам переход в интерфейсе плавный (animateFloatAsState).
+     */
+    val displayAspect = MutableStateFlow(9f / 16f)
 
     var onRequestAddMedia: (() -> Unit)? = null
     /** Открыть системный выбор аудиофайла (подставляет экран). */
@@ -134,6 +141,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     private var exportJob: Job? = null
 
     init {
+        viewModelScope.launch { controller.appliedVersion.collect { displayAspect.value = videoAspect } }
         viewModelScope.launch {
             val saved = repo.loadTimeline(projectId)
             controller.load(saved)
@@ -398,8 +406,8 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     }
 
     override fun onTapText(id: String) {
-        if (canvasTextId.value == id && textDraft.value == null) openText(id)        // второй тап — редактор
-        else { canvasTextId.value = id; selectedId.value = null }
+        selectedId.value = null
+        if (textDraft.value == null) openText(id)        // тап по тексту — сразу контекстная нижняя панель
     }
 
     override fun onTapVideo() {
@@ -415,6 +423,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     fun openNewText() {
         controller.pause(); selectedId.value = null; transitionFor.value = null; captionPanelOpen.value = false
         textDraft.value = TextDraft(TextClip(text = "", startMs = playheadMs.value), isNew = true)
+        textInputOpen.value = true
     }
 
     override fun moveText(id: String, startMs: Long) = controller.moveText(id, startMs)
@@ -432,7 +441,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     /** «Готово»: пустой новый текст не создаётся. */
     fun commitText() {
         val d = textDraft.value ?: return
-        textDraft.value = null
+        textDraft.value = null; textInputOpen.value = false
         if (d.clip.text.isBlank()) { if (!d.isNew) controller.removeText(d.clip.id); return }
         if (d.isNew) controller.addText(d.clip) else controller.updateText(d.clip)
     }
@@ -446,7 +455,26 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         }
     }
 
-    fun cancelText() { textDraft.value = null }
+    fun cancelText() { textDraft.value = null; textInputOpen.value = false }
+    fun openTextInput() { textInputOpen.value = true }
+    /** Ввод закончен: пустой новый текст не создаётся, иначе показывается панель инструментов. */
+    fun closeTextInput() {
+        textInputOpen.value = false
+        val d = textDraft.value ?: return
+        if (d.clip.text.isBlank() && d.isNew) textDraft.value = null
+    }
+
+    /** «Разделить» для текста: делит блок на два по курсору. */
+    fun splitText() {
+        val d = textDraft.value ?: return
+        val c = d.clip; val at = playheadMs.value
+        if (d.isNew || at < c.startMs + TextClip.MIN_DURATION_MS || at > c.endMs - TextClip.MIN_DURATION_MS) {
+            events.value = "Поставьте курсор внутри текстового блока"; return
+        }
+        controller.updateText(c.copy(durationMs = at - c.startMs))
+        controller.addText(c.copy(id = java.util.UUID.randomUUID().toString(), startMs = at, durationMs = c.endMs - at))
+        textDraft.value = null; canvasTextId.value = null
+    }
     fun deleteText() { textDraft.value?.let { if (!it.isNew) controller.removeText(it.clip.id) }; textDraft.value = null; canvasTextId.value = null }
 
     // ───────── экспорт ─────────

@@ -167,7 +167,8 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
         }
     }
     val pagTemplates by vm.pagTemplates.collectAsStateWithLifecycle()
-    draft?.let { d -> TextEditorSheet(d.clip, d.isNew, onChange = vm::updateTextDraft, templates = pagTemplates, onImportPag = vm::importPag, onDone = vm::commitText, onDelete = vm::deleteText, onCancel = vm::cancelText) }
+    val textInput by vm.textInputOpen.collectAsStateWithLifecycle()
+    draft?.let { d -> if (textInput) TextInputSheet(d.clip.text, onChange = { t -> vm.updateTextDraft { it.copy(text = t) } }, onDone = vm::closeTextInput) }
 
     Column(Modifier.fillMaxSize().background(BaseColors.DarkBg).systemBarsPadding()) {
         // верхняя панель
@@ -207,7 +208,9 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
         // ни при открытии панелей, ни при смене инструментов
         Box(Modifier.weight(1f).fillMaxWidth().background(Color.Black).clipToBounds(), contentAlignment = Alignment.Center) {
           // рамка выбранного формата: всё, что выходит за её границы, аппаратно отсекается
-          Box(Modifier.aspectRatio(vm.videoAspect.coerceIn(0.2f, 5f)).clipToBounds()) {
+          val dispAspectTarget by vm.displayAspect.collectAsStateWithLifecycle()
+          val dispAspect by androidx.compose.animation.core.animateFloatAsState(dispAspectTarget, androidx.compose.animation.core.tween(260), label = "aspect")
+          Box(Modifier.aspectRatio(dispAspect.coerceIn(0.2f, 5f)).clipToBounds()) {
             AndroidView(
                 factory = { c ->
                     PlayerView(c).apply {
@@ -228,15 +231,15 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                 },
             )
             val visibleTexts = texts.filter { it.isVisibleAt(playhead) && it.id != draft?.clip?.id } + listOfNotNull(draft?.clip)
-            TextOverlay(visibleTexts.filter { it.pagTemplate == null }, vm.videoAspect)
-            visibleTexts.filter { it.pagTemplate != null }.forEach { PagTitleOverlay(it, playhead, vm.videoAspect) }
-            CaptionOverlay(CaptionOps.captionAt(captionItems, playhead), captionStyle, playhead, vm.videoAspect)
+            TextOverlay(visibleTexts.filter { it.pagTemplate == null }, dispAspect)
+            visibleTexts.filter { it.pagTemplate != null }.forEach { PagTitleOverlay(it, playhead, dispAspect) }
+            CaptionOverlay(CaptionOps.captionAt(captionItems, playhead), captionStyle, playhead, dispAspect)
             // свободные жесты: перемещение / масштаб / поворот выделенного клипа или текста
             val canvasText by vm.canvasTextId.collectAsStateWithLifecycle()
             val clipAspects by vm.clipAspects.collectAsStateWithLifecycle()
             val cropClip by vm.cropClipId.collectAsStateWithLifecycle()
             val target = remember(selected, canvasText, draft, texts, liveClip, playhead, clips, clipAspects, cropClip) { vm.canvasTarget() }
-            CanvasTransformOverlay(vm.videoAspect, target, visibleTexts, vm)
+            CanvasTransformOverlay(dispAspect, target, visibleTexts, vm)
           }
           // полноэкранный режим: иконка внизу справа; в полноэкранном — ещё Play/Pause и время
           if (fullscreen) {
@@ -273,7 +276,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
 
         // Нижняя область ФИКСИРОВАННОЙ высоты: таймлайн + панель инструментов.
         // Панели (субтитры, переходы) выезжают поверх неё и не меняют размеры соседей.
-        val panelOpen = captionPanel || transitionFor != null || formatPanel
+        val panelOpen = captionPanel || transitionFor != null || formatPanel || (draft != null && !textInput)
         Box(Modifier.fillMaxWidth().height((TL_HEIGHT_DP + TOOLBAR_HEIGHT_DP).dp).background(BaseColors.DarkBg)) {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxWidth().height(TL_HEIGHT_DP.dp)) {
@@ -340,6 +343,13 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
         }
         val curFormat by vm.format.collectAsStateWithLifecycle()
             BottomPanel(visible = formatPanel) { FormatPanel(curFormat, vm::setFormat, vm::closeFormat) }
+            val textPanelClip = draft
+            BottomPanel(visible = textPanelClip != null && !textInput) {
+                if (textPanelClip != null) TextContextPanel(
+                    textPanelClip.clip, textPanelClip.isNew, onChange = vm::updateTextDraft, templates = pagTemplates, onImportPag = vm::importPag,
+                    onEditText = vm::openTextInput, onSplit = vm::splitText, onDelete = vm::deleteText, onDone = vm::commitText,
+                )
+            }
             val tf = transitionFor
             BottomPanel(visible = tf != null && !captionPanel) {
                 if (tf != null) TransitionPanel(
