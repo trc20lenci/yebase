@@ -289,13 +289,26 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     }
 
     // ───────── жесты на холсте ─────────
+    /** Реальные пропорции исходников (по uri); рамка выделения должна совпадать с вписанным кадром. */
+    val clipAspects = MutableStateFlow<Map<String, Float>>(emptyMap())
+    private val aspectRequested = HashSet<String>()
+    private fun loadClipAspect(c: Clip) {
+        if (!aspectRequested.add(c.uri)) return
+        viewModelScope.launch(Dispatchers.IO) {
+            MediaProbe.displaySize(getApplication(), c.uri, c.type)?.let { (w, h) ->
+                clipAspects.update { it + (c.uri to w.toFloat() / h) }
+            }
+        }
+    }
+
     /** Что выделено на холсте: слой текста (черновик имеет приоритет) или клип под курсором. */
     fun canvasTarget(): CanvasTarget? {
         textDraft.value?.let { return CanvasTarget.Text(it.clip, isDraft = true) }
         canvasTextId.value?.let { id -> controller.findText(id)?.let { return CanvasTarget.Text(it, isDraft = false) } }
         val clip = selectedClipAtPlayhead() ?: return null
         val live = liveClipTransform.value?.takeIf { it.id == clip.id }?.current
-        return CanvasTarget.Clip(clip.id, live ?: effectiveTransform(clip))
+        val aspect = clipAspects.value[clip.uri] ?: videoAspect.also { loadClipAspect(clip) }
+        return CanvasTarget.Clip(clip.id, live ?: effectiveTransform(clip), aspect)
     }
 
     /** Текущее положение кадра клипа: интерполяция по ключам на курсоре, иначе статическая трансформация. */
