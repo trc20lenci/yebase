@@ -165,6 +165,14 @@ class TimelineController(
     /** Положение кадра клипа на холсте: между beginEdit() и commitEdit() — без пересборки плеера. */
     fun setClipTransform(id: Long, t: ClipTransform) { if (model.setTransform(id, t)) publish() }
 
+    /** Кадрирование клипа (null — снять). Пересобирает композицию: Crop Effect идёт и в превью, и в экспорт. */
+    fun setCrop(id: Long, r: com.base.editor.core.CropRect?) {
+        pause(); model.checkpoint()
+        if (!model.setCrop(id, r)) { model.discardCheckpointIfNoop(); return }
+        model.discardCheckpointIfNoop(); afterStructuralEdit()
+    }
+    fun cropOf(id: Long) = model.state().cropOf(id)
+
     // ───────── ключевые кадры ─────────
     /** Ключ под курсором (в локальном времени клипа) или null. */
     fun keyframeAt(clipId: Long, localMs: Long) = model.keyframeAt(clipId, localMs)

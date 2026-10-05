@@ -2,6 +2,7 @@ package com.base.editor.domain
 
 import com.base.editor.core.Clip
 import com.base.editor.core.ClipTransform
+import com.base.editor.core.CropRect
 import com.base.editor.core.Keyframe
 import com.base.editor.core.MediaType
 import com.base.editor.core.Transition
@@ -14,7 +15,9 @@ data class TimelineState(
     val transitions: List<Transition>,
     val transforms: Map<Long, ClipTransform> = emptyMap(),
     val keyframes: Map<Long, List<Keyframe>> = emptyMap(),
+    val crops: Map<Long, CropRect> = emptyMap(),
 ) {
+    fun cropOf(clipId: Long) = crops[clipId] ?: CropRect()
     fun transformOf(clipId: Long) = transforms[clipId] ?: ClipTransform()
     fun keyframesOf(clipId: Long) = keyframes[clipId] ?: emptyList()
     /** Трансформация кадра клипа в момент [localMs] (от начала клипа): интерполяция по ключам или статика. */
@@ -35,13 +38,14 @@ class TimelineModel {
     private var transitions = mutableListOf<Transition>()
     private var transforms = mutableMapOf<Long, ClipTransform>()
     private var keyframes = mutableMapOf<Long, List<Keyframe>>()
+    private var crops = mutableMapOf<Long, CropRect>()
     private var nextId = 1L
     private val undoStack = ArrayDeque<TimelineState>()
     private val redoStack = ArrayDeque<TimelineState>()
     /** Состояние на начало текущего жеста (его позиции — точка отсчёта для move/trim, пока палец не отпущен). */
     private var gestureBase: TimelineState? = null
 
-    fun state() = TimelineState(clips.toList(), transitions.toList(), transforms.toMap(), keyframes.toMap())
+    fun state() = TimelineState(clips.toList(), transitions.toList(), transforms.toMap(), keyframes.toMap(), crops.toMap())
     val totalMs get() = state().totalMs
     val canUndo get() = undoStack.isNotEmpty()
     val canRedo get() = redoStack.isNotEmpty()
@@ -131,6 +135,7 @@ class TimelineModel {
         replace(c.copy(endMs = atMs))
         clips += right
         transforms[c.id]?.let { transforms[right.id] = it }
+        crops[c.id]?.let { crops[right.id] = it }
         // ключи делятся между половинами: левые остаются, правые сдвигаются к началу правой половины
         keyframes[c.id]?.let { keys ->
             val cut = atMs - c.startMs
@@ -231,6 +236,14 @@ class TimelineModel {
         return true
     }
 
+    // ───────── кадрирование ─────────
+    /** null или полный прямоугольник — снять кадрирование. */
+    fun setCrop(clipId: Long, r: CropRect?): Boolean {
+        if (find(clipId) == null) return false
+        if (r == null || r.sane().isFull) crops.remove(clipId) else crops[clipId] = r.sane()
+        return true
+    }
+
     // ───────── ключевые кадры (как в CapCut: ромбики на дорожке клипа) ─────────
     /** Ключ ровно в момент [timeMs] (от начала клипа) или null. */
     fun keyframeAt(clipId: Long, timeMs: Long): Keyframe? = KeyframeTrack.findAt(keyframes[clipId].orEmpty(), timeMs)
@@ -290,6 +303,7 @@ class TimelineModel {
         }
         transitions.forEach { t -> append("T\t${t.leftId}\t${t.rightId}\t${t.shaderId}\t${t.durationMs}\n") }
         transforms.forEach { (id, t) -> append("X\t$id\t${t.x}\t${t.y}\t${t.scale}\t${t.rotationDeg}\n") }
+        crops.forEach { (id, r) -> append("C\t$id\t${r.left}\t${r.top}\t${r.right}\t${r.bottom}\n") }
         keyframes.forEach { (id, keys) -> keys.forEach { k -> append("K\t$id\t${k.timeMs}\t${k.x}\t${k.y}\t${k.scale}\t${k.rotationDeg}\n") } }
     }
 
@@ -298,6 +312,7 @@ class TimelineModel {
         val newTr = mutableListOf<Transition>()
         val newX = mutableMapOf<Long, ClipTransform>()
         val newK = mutableMapOf<Long, MutableList<Keyframe>>()
+        val newC = mutableMapOf<Long, CropRect>()
         var next = 1L
         var header = false
         for (line in data.lineSequence()) {
@@ -318,6 +333,11 @@ class TimelineModel {
                     if (t.size >= 6) newX[t[1].toLong()] = ClipTransform(t[2].toFloat(), t[3].toFloat(), t[4].toFloat(), t[5].toFloat())
                     continue
                 }
+                if (f[0] == "C") {
+                    val t = line.split('\t')
+                    if (t.size >= 6) newC[t[1].toLong()] = CropRect(t[2].toFloat(), t[3].toFloat(), t[4].toFloat(), t[5].toFloat()).sane()
+                    continue
+                }
                 if (f[0] == "K") {
                     val t = line.split('\t')
                     if (t.size >= 7) newK.getOrPut(t[1].toLong()) { mutableListOf() } +=
@@ -329,7 +349,7 @@ class TimelineModel {
             } catch (_: NumberFormatException) { return false }
         }
         if (!header) return false
-        clips = newClips; transitions = newTr; transforms = newX
+        clips = newClips; transitions = newTr; transforms = newX; crops = newC
         keyframes = newK.mapValues { it.value.toList() }.toMutableMap(); nextId = next
         undoStack.clear(); redoStack.clear()
         sanitize()
@@ -341,7 +361,7 @@ class TimelineModel {
     private fun replace(c: Clip) { val i = clips.indexOfFirst { it.id == c.id }; if (i >= 0) clips[i] = c }
     private fun restore(s: TimelineState) {
         clips = s.clips.toMutableList(); transitions = s.transitions.toMutableList()
-        transforms = s.transforms.toMutableMap(); keyframes = s.keyframes.toMutableMap()
+        transforms = s.transforms.toMutableMap(); keyframes = s.keyframes.toMutableMap(); crops = s.crops.toMutableMap()
     }
 
     /** Убирает переходы, потерявшие стык, и зажимает длительность в [MIN_TRANSITION_MS, длина входящего клипа]. */
@@ -350,6 +370,7 @@ class TimelineModel {
         val ids = clips.map { it.id }.toSet()
         transforms.keys.retainAll(ids)
         keyframes.keys.retainAll(ids)
+        crops.keys.retainAll(ids)
         // ключи за пределами (подрезанного) клипа прижимаются к его краям
         keyframes.replaceAll { id, keys ->
             val len = find(id)?.lengthMs ?: 0L

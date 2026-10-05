@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.foundation.layout.Arrangement
@@ -217,7 +218,8 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
             // свободные жесты: перемещение / масштаб / поворот выделенного клипа или текста
             val canvasText by vm.canvasTextId.collectAsStateWithLifecycle()
             val clipAspects by vm.clipAspects.collectAsStateWithLifecycle()
-            val target = remember(selected, canvasText, draft, texts, liveClip, playhead, clips, clipAspects) { vm.canvasTarget() }
+            val cropClip by vm.cropClipId.collectAsStateWithLifecycle()
+            val target = remember(selected, canvasText, draft, texts, liveClip, playhead, clips, clipAspects, cropClip) { vm.canvasTarget() }
             CanvasTransformOverlay(vm.videoAspect, target, visibleTexts, vm)
           }
         }
@@ -280,6 +282,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                         ToolRow {
                             ToolButton(Icons.Rounded.ChevronLeft, "Назад") { vm.select(null) }
                             ToolButton(Icons.Rounded.VerticalSplit, "Разделить", onClick = vm::split)
+                            ToolButton(Icons.Rounded.Crop, "Кадрирование", onClick = vm::openCrop)
                             ToolButton(Icons.Rounded.Animation, "Анимации") { soon(ctx) }
                             ToolButton(Icons.Rounded.DeleteOutline, "Удалить", onClick = vm::deleteSelected)
                         }
@@ -302,7 +305,13 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     onPreset = vm.captions::applyPreset, onStyle = vm.captions::updateStyle, onClose = vm::closeCaptions,
                 )
             }
-            val curFormat by vm.format.collectAsStateWithLifecycle()
+            val cropId by vm.cropClipId.collectAsStateWithLifecycle()
+        if (cropId != null) {
+            val frame by vm.cropFrame.collectAsStateWithLifecycle()
+            val init by vm.cropInitial.collectAsStateWithLifecycle()
+            CropDialog(frame, init, onDone = vm::applyCrop, onCancel = vm::cancelCrop)
+        }
+        val curFormat by vm.format.collectAsStateWithLifecycle()
             BottomPanel(visible = formatPanel) { FormatPanel(curFormat, vm::setFormat, vm::closeFormat) }
             val tf = transitionFor
             BottomPanel(visible = tf != null && !captionPanel) {

@@ -49,6 +49,17 @@ data class Keyframe(
     fun transform() = ClipTransform(x, y, scale, rotationDeg)
 }
 
+/** Прямоугольник кадрирования в долях исходного кадра (0..1, начало слева сверху). */
+data class CropRect(val left: Float = 0f, val top: Float = 0f, val right: Float = 1f, val bottom: Float = 1f) {
+    val isFull get() = left <= 0.001f && top <= 0.001f && right >= 0.999f && bottom >= 0.999f
+    val width get() = right - left
+    val height get() = bottom - top
+    fun sane(): CropRect {
+        val l = left.coerceIn(0f, 0.95f); val t = top.coerceIn(0f, 0.95f)
+        return CropRect(l, t, right.coerceIn(l + 0.05f, 1f), bottom.coerceIn(t + 0.05f, 1f))
+    }
+}
+
 /** Файл, выбранный в галерее. */
 data class PickedMedia(val uri: String, val type: MediaType, val durationMs: Long) {
     fun encode() = "${type.code}|$durationMs|$uri"

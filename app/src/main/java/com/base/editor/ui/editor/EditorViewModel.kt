@@ -1,6 +1,7 @@
 package com.base.editor.ui.editor
 
 import android.app.Application
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
@@ -288,6 +289,48 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         controller.pause(); captions.generate(controller.state.value)
     }
 
+    // ───────── кадрирование ─────────
+    val cropClipId = MutableStateFlow<Long?>(null)
+    val cropFrame = MutableStateFlow<androidx.compose.ui.graphics.ImageBitmap?>(null)
+    val cropInitial = MutableStateFlow(com.base.editor.core.CropRect())
+
+    fun openCrop() {
+        val clip = selectedClipAtPlayhead() ?: return
+        if (clip.type == com.base.editor.core.MediaType.AUDIO) return
+        controller.pause()
+        cropInitial.value = controller.cropOf(clip.id)
+        cropFrame.value = null; cropClipId.value = clip.id
+        // кадр показываем БЕЗ уже применённой обрезки, чтобы рамку можно было расширить обратно
+        val local = (playheadMs.value - clip.startMs).coerceIn(0L, (clip.endMs - clip.startMs).coerceAtLeast(0L))
+        viewModelScope.launch(Dispatchers.IO) {
+            val bmp = runCatching { loadFrame(clip, local) }.getOrNull()
+            cropFrame.value = bmp?.asImageBitmap()
+        }
+    }
+    fun applyCrop(r: com.base.editor.core.CropRect?) {
+        cropClipId.value?.let { controller.setCrop(it, r) }
+        cropClipId.value = null; cropFrame.value = null
+    }
+    fun cancelCrop() { cropClipId.value = null; cropFrame.value = null }
+
+    private fun loadFrame(c: Clip, localMs: Long): android.graphics.Bitmap? {
+        val ctx = getApplication<Application>()
+        val uri = android.net.Uri.parse(c.uri)
+        return if (c.type == com.base.editor.core.MediaType.VIDEO) {
+            val r = android.media.MediaMetadataRetriever()
+            try {
+                r.setDataSource(ctx, uri)
+                r.getScaledFrameAtTime((c.srcInMs + localMs) * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 1280, 1280)
+            } finally { r.release() }
+        } else {
+            android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(ctx.contentResolver, uri)) { dec, info, _ ->
+                val big = maxOf(info.size.width, info.size.height)
+                if (big > 1600) dec.setTargetSampleSize(big / 1600)
+                dec.allocator = android.graphics.ImageDecoder.ALLOCATOR_SOFTWARE
+            }
+        }
+    }
+
     // ───────── жесты на холсте ─────────
     /** Реальные пропорции исходников (по uri); рамка выделения должна совпадать с вписанным кадром. */
     val clipAspects = MutableStateFlow<Map<String, Float>>(emptyMap())
@@ -307,7 +350,8 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         canvasTextId.value?.let { id -> controller.findText(id)?.let { return CanvasTarget.Text(it, isDraft = false) } }
         val clip = selectedClipAtPlayhead() ?: return null
         val live = liveClipTransform.value?.takeIf { it.id == clip.id }?.current
-        val aspect = clipAspects.value[clip.uri] ?: videoAspect.also { loadClipAspect(clip) }
+        val crop = controller.cropOf(clip.id)
+        val aspect = (clipAspects.value[clip.uri] ?: videoAspect.also { loadClipAspect(clip) }) * (crop.width / crop.height)
         return CanvasTarget.Clip(clip.id, live ?: effectiveTransform(clip), aspect)
     }
 

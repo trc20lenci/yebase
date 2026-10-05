@@ -11,6 +11,7 @@ import androidx.media3.effect.MatrixTransformation
 import androidx.media3.effect.OverlayEffect
 import android.graphics.Matrix
 import com.base.editor.core.ClipTransform
+import androidx.media3.effect.Crop
 import androidx.media3.effect.Presentation
 import androidx.media3.transformer.Composition
 import androidx.media3.transformer.EditedMediaItem
@@ -73,7 +74,12 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
         for (clip in main) {
             if (clip.startMs > cursorMs) seq.addGap((clip.startMs - cursorMs) * 1000)
 
-            val effects = mutableListOf<Effect>(Presentation.createForWidthAndHeight(req.canvas.width, req.canvas.height, Presentation.LAYOUT_SCALE_TO_FIT))
+            val effects = mutableListOf<Effect>()
+            // кадрирование — первым, до вписывания в холст; Crop принимает границы в NDC (−1..1, Y вверх)
+            req.state.crops[clip.id]?.takeIf { !it.isFull }?.let { c ->
+                effects += Crop(-1f + 2f * c.left, -1f + 2f * c.right, 1f - 2f * c.bottom, 1f - 2f * c.top)
+            }
+            effects += (Presentation.createForWidthAndHeight(req.canvas.width, req.canvas.height, Presentation.LAYOUT_SCALE_TO_FIT))
             val keys = req.state.keyframes[clip.id].orEmpty()
             if (keys.isNotEmpty()) effects += keyframeTransformEffect(keys, clip.startMs, req.canvas)
             else req.state.transforms[clip.id]?.takeIf { !it.isIdentity }?.let { effects += clipTransformEffect(it, req.canvas) }
