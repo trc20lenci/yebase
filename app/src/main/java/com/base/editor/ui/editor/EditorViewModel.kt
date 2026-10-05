@@ -123,12 +123,16 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     /** Открыть системный выбор аудиофайла (подставляет экран). */
     var onRequestAddAudio: (() -> Unit)? = null
     private var aspect = 9f / 16f
+    private var originalAspect = 9f / 16f
+    val format = MutableStateFlow(com.base.editor.core.CanvasFormat.ORIGINAL)
+    val formatPanelOpen = MutableStateFlow(false)
     private var exportJob: Job? = null
 
     init {
         viewModelScope.launch {
             val saved = repo.loadTimeline(projectId)
             controller.load(saved)
+            format.value = com.base.editor.core.CanvasFormat.of(repo.loadFormat(projectId))
             captions.load(repo.loadCaptions(projectId))
             controller.loadTexts(repo.loadTexts(projectId))
             withContext(dispatchers.default) { detectAspect() }      // чтение метаданных — не на главном потоке
@@ -157,17 +161,23 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     // ───────── проект ─────────
     private suspend fun detectAspect() {
         val first = controller.state.value.clips.filter { it.row == 0 }.minByOrNull { it.startMs } ?: return
-        MediaProbe.displaySize(getApplication(), first.uri, first.type)?.let { (w, h) -> aspect = w.toFloat() / h }
+        MediaProbe.displaySize(getApplication(), first.uri, first.type)?.let { (w, h) -> originalAspect = w.toFloat() / h }
     }
 
+    /** Формат холста: пресет или пропорции первого клипа («Оригинал»). Влияет и на превью, и на экспорт (aspect → canvasFor). */
+    fun setFormat(f: com.base.editor.core.CanvasFormat) { format.value = f; applyCanvas(); persist() }
+    fun openFormat() { controller.pause(); selectedId.value = null; transitionFor.value = null; captionPanelOpen.value = false; formatPanelOpen.value = true }
+    fun closeFormat() { formatPanelOpen.value = false }
+
     private fun shortSide() = when (resolution.value) { "480p" -> 480; "1080p" -> 1080; else -> 720 }
-    private fun applyCanvas() = controller.setCanvas(CompositionFactory.canvasFor(aspect, shortSide()))
+    private fun applyCanvas() { aspect = format.value.aspect ?: originalAspect; controller.setCanvas(CompositionFactory.canvasFor(aspect, shortSide())) }
     fun setResolution(r: String) { resolution.value = r; applyCanvas() }
 
     private fun persist() {
         val data = controller.serialize(); val clips = controller.state.value.clips
         val cap = captions.toJson(); val txt = controller.serializeTexts()
-        persistScope.launch { repo.save(projectId, data, clips, cap, txt) }
+        val fmt = format.value.id
+        persistScope.launch { repo.save(projectId, data, clips, cap, txt, fmt) }
     }
     fun saveNow() = persist()
 
@@ -265,7 +275,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     }
 
     // ───────── субтитры ─────────
-    fun openCaptions() { controller.pause(); selectedId.value = null; transitionFor.value = null; captionPanelOpen.value = true }
+    fun openCaptions() { controller.pause(); formatPanelOpen.value = false; selectedId.value = null; transitionFor.value = null; captionPanelOpen.value = true }
     fun closeCaptions() { captionPanelOpen.value = false; editingCaptionId.value = null }
     override fun openCaption(id: String) {
         openCaptions()

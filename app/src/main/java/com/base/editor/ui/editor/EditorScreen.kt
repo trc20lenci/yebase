@@ -29,6 +29,7 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -74,6 +75,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.material.icons.rounded.AspectRatio
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
@@ -113,6 +116,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     val ctx = LocalContext.current
     val density = LocalDensity.current
     val clips by vm.clips.collectAsStateWithLifecycle()
+    val formatPanel by vm.formatPanelOpen.collectAsStateWithLifecycle()
     val selected by vm.selectedId.collectAsStateWithLifecycle()
     val playhead by vm.playheadMs.collectAsStateWithLifecycle()
     val total by vm.totalMs.collectAsStateWithLifecycle()
@@ -150,6 +154,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     BackHandler {
         when {
             draft != null -> vm.cancelText()
+            formatPanel -> vm.closeFormat()
             captionPanel -> vm.closeCaptions()
             transitionFor != null -> vm.closeTransitions()
             selected != null -> vm.select(null)
@@ -183,7 +188,9 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
 
         // плеер: занимает всё, что осталось над фиксированной нижней областью, поэтому его размер не меняется
         // ни при открытии панелей, ни при смене инструментов
-        Box(Modifier.weight(1f).fillMaxWidth().background(Color.Black)) {
+        Box(Modifier.weight(1f).fillMaxWidth().background(Color.Black).clipToBounds(), contentAlignment = Alignment.Center) {
+          // рамка выбранного формата: всё, что выходит за её границы, аппаратно отсекается
+          Box(Modifier.aspectRatio(vm.videoAspect.coerceIn(0.2f, 5f)).clipToBounds()) {
             AndroidView(
                 factory = { c ->
                     PlayerView(c).apply {
@@ -212,6 +219,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
             val clipAspects by vm.clipAspects.collectAsStateWithLifecycle()
             val target = remember(selected, canvasText, draft, texts, liveClip, playhead, clips, clipAspects) { vm.canvasTarget() }
             CanvasTransformOverlay(vm.videoAspect, target, visibleTexts, vm)
+          }
         }
 
         // время / play / undo-redo
@@ -236,7 +244,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
 
         // Нижняя область ФИКСИРОВАННОЙ высоты: таймлайн + панель инструментов.
         // Панели (субтитры, переходы) выезжают поверх неё и не меняют размеры соседей.
-        val panelOpen = captionPanel || transitionFor != null
+        val panelOpen = captionPanel || transitionFor != null || formatPanel
         Box(Modifier.fillMaxWidth().height((TL_HEIGHT_DP + TOOLBAR_HEIGHT_DP).dp).background(BaseColors.DarkBg)) {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxWidth().height(TL_HEIGHT_DP.dp)) {
@@ -265,6 +273,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                             ToolButton(Icons.Rounded.MusicNote, "Звук", onClick = vm::addAudio)
                             ToolButton(Icons.Rounded.TextFields, "Текст", onClick = vm::openNewText)
                             ToolButton(Icons.Rounded.ClosedCaption, "Субтитры", onClick = vm::openCaptions)
+                            ToolButton(Icons.Rounded.AspectRatio, "Формат", onClick = vm::openFormat)
                             ToolButton(Icons.Rounded.Layers, "Наложение") { soon(ctx) }
                         }
                     } else {
@@ -293,6 +302,8 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     onPreset = vm.captions::applyPreset, onStyle = vm.captions::updateStyle, onClose = vm::closeCaptions,
                 )
             }
+            val curFormat by vm.format.collectAsStateWithLifecycle()
+            BottomPanel(visible = formatPanel) { FormatPanel(curFormat, vm::setFormat, vm::closeFormat) }
             val tf = transitionFor
             BottomPanel(visible = tf != null && !captionPanel) {
                 if (tf != null) TransitionPanel(
@@ -307,6 +318,29 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
 }
 
 private const val TOOLBAR_HEIGHT_DP = 68
+
+/** Панель «Формат»: пресеты пропорций холста. */
+@Composable
+private fun FormatPanel(current: com.base.editor.core.CanvasFormat, onPick: (com.base.editor.core.CanvasFormat) -> Unit, onClose: () -> Unit) {
+    Column(Modifier.fillMaxWidth().background(BaseColors.DarkPanel).padding(horizontal = 12.dp, vertical = 10.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Формат", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Spacer(Modifier.weight(1f))
+            RoundIcon(Icons.Rounded.Check, "Готово", onClose)
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            com.base.editor.core.CanvasFormat.entries.forEach { f ->
+                val on = f == current
+                Box(
+                    Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
+                        .background(if (on) BaseColors.Cyan else Color.White.copy(alpha = .1f))
+                        .clickable { onPick(f) }.padding(vertical = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(f.label, color = if (on) Color.Black else Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1) }
+            }
+        }
+    }
+}
 
 /** Панель, выезжающая снизу поверх фиксированной области (не влияет на размеры соседей). */
 @Composable
