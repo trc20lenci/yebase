@@ -73,6 +73,8 @@ fun CaptionPanel(
     generation: GenerationState,
     playheadMs: Long,
     editingId: String?,
+    language: com.base.editor.captions.CaptionLanguage,
+    onLanguage: (com.base.editor.captions.CaptionLanguage) -> Unit,
     onGenerate: () -> Unit,
     onDismissError: () -> Unit,
     onOpenItem: (CaptionItem) -> Unit,
@@ -98,7 +100,7 @@ fun CaptionPanel(
             Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Check, "Готово", tint = Color.White) }
         }
         Box(Modifier.heightIn(max = 250.dp).fillMaxWidth()) {
-            if (tab == 0) TextTab(items, generation, playheadMs, onGenerate, onDismissError, onOpenItem, onAdd, onClearAll)
+            if (tab == 0) TextTab(items, generation, playheadMs, language, onLanguage, onGenerate, onDismissError, onOpenItem, onAdd, onClearAll)
             else StyleTab(style, onPreset, onStyle)
         }
     }
@@ -109,6 +111,7 @@ fun CaptionPanel(
 @Composable
 private fun TextTab(
     items: List<CaptionItem>, generation: GenerationState, playheadMs: Long,
+    language: com.base.editor.captions.CaptionLanguage, onLanguage: (com.base.editor.captions.CaptionLanguage) -> Unit,
     onGenerate: () -> Unit, onDismissError: () -> Unit,
     onOpen: (CaptionItem) -> Unit, onAdd: () -> Unit, onClearAll: () -> Unit,
 ) {
@@ -121,6 +124,15 @@ private fun TextTab(
             else -> {
                 if (generation is GenerationState.Failed) {
                     Text(generation.message, color = Color(0xFFFF8A80), fontSize = 13.sp, modifier = Modifier.clickable(onClick = onDismissError).padding(vertical = 4.dp))
+                }
+                // язык речи: «Русский» принудительно включает русский режим модели, «Авто» — определение по звуку
+                Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    com.base.editor.captions.CaptionLanguage.entries.forEach { l ->
+                        val on = l == language
+                        Text(l.label, Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) BaseColors.Cyan else BaseColors.DarkSlot)
+                            .clickable { onLanguage(l) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                            color = if (on) Color.Black else Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
+                    }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.weight(1f))

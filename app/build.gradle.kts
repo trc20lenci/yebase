@@ -4,6 +4,24 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
+// k2-fsa/sherpa-onnx (Apache-2.0): официальный AAR из релиза GitHub; скачивается один раз в app/libs
+val sherpaVersion = "1.13.8"
+val sherpaAar = layout.projectDirectory.file("libs/sherpa-onnx-$sherpaVersion.aar").asFile
+val downloadSherpa by tasks.registering {
+    outputs.file(sherpaAar)
+    onlyIf { !sherpaAar.exists() }
+    doLast {
+        sherpaAar.parentFile.mkdirs()
+        val part = File(sherpaAar.parentFile, sherpaAar.name + ".part")
+        java.net.URI("https://github.com/k2-fsa/sherpa-onnx/releases/download/v$sherpaVersion/sherpa-onnx-$sherpaVersion.aar").toURL().openStream().use { input ->
+            part.outputStream().use { input.copyTo(it) }
+        }
+        check(part.length() > 40_000_000L) { "sherpa-onnx AAR скачан не полностью" }
+        check(part.renameTo(sherpaAar)) { "не удалось сохранить sherpa-onnx AAR" }
+    }
+}
+tasks.matching { it.name == "preBuild" }.configureEach { dependsOn(downloadSherpa) }
+
 android {
     namespace = "com.base.editor"
     compileSdk = 36
@@ -14,6 +32,8 @@ android {
         targetSdk = 36
         versionCode = 2
         versionName = "0.1.0"
+        // sherpa-onnx несёт нативные библиотеки; x86 нужен только эмуляторам и сильно раздувает APK
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
     signingConfigs {
@@ -62,7 +82,7 @@ dependencies {
     implementation(libs.media3.ui)
     implementation(libs.media3.transformer)
     implementation(libs.media3.effect)
-    implementation(libs.litert)
+    implementation(files(sherpaAar))
     implementation(libs.libpag)
 
     testImplementation(libs.junit)

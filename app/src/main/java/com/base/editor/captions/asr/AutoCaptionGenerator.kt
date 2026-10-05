@@ -3,6 +3,7 @@ package com.base.editor.captions.asr
 import android.content.Context
 import android.util.Log
 import com.base.editor.captions.CaptionItem
+import com.base.editor.captions.CaptionLanguage
 import com.base.editor.captions.CaptionSegmenter
 import com.base.editor.captions.WordTimestamp
 import com.base.editor.core.MediaType
@@ -22,20 +23,19 @@ class NoSpeechException : Exception("Речь не найдена")
  */
 class AutoCaptionGenerator(
     private val context: Context,
-    private val store: WhisperModelStore = WhisperModelStore(context),
+    private val store: SherpaModelStore = SherpaModelStore(context),
     private val extractor: AudioPcmExtractor = AudioPcmExtractor(context),
     private val segmenter: CaptionSegmenter = CaptionSegmenter(),
     private val default: CoroutineDispatcher = Dispatchers.Default,
 ) {
-    suspend fun generate(timeline: TimelineState): List<CaptionItem> {
+    suspend fun generate(timeline: TimelineState, language: CaptionLanguage = CaptionLanguage.AUTO): List<CaptionItem> {
         val clips = timeline.clips.filter { it.row == 0 && it.type == MediaType.VIDEO }.sortedBy { it.startMs }
         if (clips.isEmpty()) throw NoSpeechException()
 
-        val modelFile = store.ensure()
+        val files = store.ensure()
         return withContext(default) {
-            val frontend = context.assets.open("asr/filters_vocab_multilingual.bin").use(WhisperFrontend::load)
             val words = mutableListOf<WordTimestamp>()
-            WhisperTranscriber(modelFile, frontend).use { recognizer ->
+            SherpaWhisper(files, language.code).use { recognizer ->
                 for (clip in clips) {
                     coroutineContext.ensureActive()
                     val pcm = readPcm(clip.uri, clip.srcInMs, clip.srcInMs + clip.lengthMs) ?: continue
@@ -43,11 +43,14 @@ class AutoCaptionGenerator(
                     val voiced = SpeechActivity.detect(energies)
                     for (w in SpeechActivity.windows(voiced, energies, clip.lengthMs)) {
                         coroutineContext.ensureActive()
-                        val text = clean(recognizer.transcribe(SpeechActivity.toFloats(pcm, w.startMs, w.endMs)).text)
-                        if (text.isEmpty()) continue
-                        val tokens = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
-                        SpeechActivity.assignWordTimes(tokens, w.voiced, Span(w.startMs, w.endMs), energies).forEach {
-                            words += it.copy(startMs = clip.startMs + it.startMs, endMs = clip.startMs + it.endMs)
+                        val r = recognizer.transcribe(SpeechActivity.toFloats(pcm, w.startMs, w.endMs))
+                        if (clean(r.text).isEmpty()) continue
+                        // тайминги слов — из токенов модели (миллисекунды от начала окна), без подгонки по энергии звука
+                        val timed = WordTimings.build(r.text, r.tokens, r.timestampsSec, w.endMs - w.startMs)
+                        dedupe(timed).forEach {
+                            val s = clip.startMs + w.startMs + it.startMs
+                            val e = minOf(clip.startMs + w.startMs + it.endMs, clip.startMs + clip.lengthMs)
+                            if (e > s) words += it.copy(startMs = s, endMs = e)
                         }
                     }
                 }
@@ -55,6 +58,16 @@ class AutoCaptionGenerator(
             if (words.isEmpty()) throw NoSpeechException()
             segmenter.segment(words)
         }
+    }
+
+    /** Убирает зацикленные повторы («галлюцинации» на музыке): больше двух одинаковых слов подряд. */
+    private fun dedupe(ws: List<WordTimestamp>): List<WordTimestamp> {
+        val out = ArrayList<WordTimestamp>(); var run = 0
+        for (w in ws) {
+            if (out.isNotEmpty() && out.last().word.equals(w.word, ignoreCase = true)) { if (++run >= 3) continue } else run = 0
+            out += w
+        }
+        return out
     }
 
     private suspend fun readPcm(uri: String, fromMs: Long, toMs: Long): ShortArray? {

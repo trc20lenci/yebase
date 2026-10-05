@@ -325,9 +325,11 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                 awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
             })
 
+            val captionLang by vm.captionLanguage.collectAsStateWithLifecycle()
             BottomPanel(visible = captionPanel) {
                 CaptionPanel(
                     items = captionItems, style = captionStyle, generation = captionGen, playheadMs = playhead, editingId = editingCaption,
+                    language = captionLang, onLanguage = vm::setCaptionLanguage,
                     onGenerate = vm::generateCaptions, onDismissError = vm.captions::dismissError,
                     onOpenItem = vm::openCaptionItem, onCloseEdit = { vm.editingCaptionId.value = null },
                     onUpdateText = vm.captions::updateText, onUpdateTiming = vm.captions::updateTiming, onDelete = vm.captions::delete,

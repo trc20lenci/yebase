@@ -6,3 +6,6 @@
     @kotlin.Metadata *;
 }
 -ignorewarnings
+
+# sherpa-onnx: классы вызываются из нативного кода (JNI)
+-keep class com.k2fsa.sherpa.onnx.** { *; }
