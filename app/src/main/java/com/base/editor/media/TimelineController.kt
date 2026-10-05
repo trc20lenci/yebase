@@ -21,6 +21,7 @@ import com.base.editor.text.TextJson
 import com.base.editor.text.TextTrack
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -90,13 +91,19 @@ class TimelineController(
     /** Растёт каждый раз, когда новая композиция подготовлена и показана. */
     val appliedVersion: StateFlow<Int> = _applied.asStateFlow()
     private var pendingSeekMs = -1L
+    /** Play нажат, пока плеер ещё готовился. */
+    private var playWhenReady = false
+    private val _buffering = MutableStateFlow(false)
+    /** true — плеер ждёт данные (BUFFERING) или готовит композицию. */
+    val isBuffering: StateFlow<Boolean> = _buffering.asStateFlow()
 
     init {
         scope.launch(dispatchers.default) {                 // конвейер пересборки
             for (ignored in rebuildRequests) {
                 try {
                     val snapshot = _state.value
-                    val request = CompositionRequest(snapshot, canvas, safeMode = safeMode, onTransitionFallback = { _events.tryEmit(it) })
+                    val request = CompositionRequest(snapshot, canvas, safeMode = safeMode, onTransitionFallback = { _events.tryEmit(it) },
+                        liveTransforms = { id, localMs -> _state.value.transformAt(id, localMs) })
                     val composition = runCatching { factory.build(request) }
                         .onFailure { Log.e(TAG, "не удалось собрать композицию", it); _events.tryEmit("Не удалось подготовить предпросмотр") }
                         .getOrNull()
@@ -182,8 +189,20 @@ class TimelineController(
         pause(); model.checkpoint()
         val added = model.toggleKeyframe(clipId, localMs)
         model.discardCheckpointIfNoop()
-        afterStructuralEdit()
+        commitTransformEdit()
         return added
+    }
+
+    /**
+     * Конец правки положения/ключей кадра. Матрица эффекта читает [state] на каждом кадре, поэтому композицию
+     * НЕ пересобираем: достаточно перерисовать текущий кадр (seek в ту же позицию) — результат виден сразу, а не через секунды.
+     * Сигнал appliedVersion подаётся после перерисовки, по нему интерфейс снимает «живую» подмену.
+     */
+    fun commitTransformEdit() {
+        model.discardCheckpointIfNoop()
+        publish(); _committed.tryEmit(Unit)
+        if (playerReady) seekPlayerSafely(player.currentPosition)
+        scope.launch { delay(FRAME_REFRESH_MS); _applied.value++ }
     }
 
     /** Автоключ во время жеста трансформации: фиксирует новые координаты на текущей миллисекунде (без пересборки). */
@@ -242,19 +261,31 @@ class TimelineController(
         val junction = _state.value.clips.firstOrNull { it.id == t.rightId }?.startMs ?: return
         seekTo((junction - PREVIEW_PAD_MS).coerceAtLeast(0))
         stopAtMs = junction + t.durationMs + PREVIEW_PAD_MS
-        if (playerReady) player.play()
+        if (playerReady) resumePlayer()
     }
 
     // ───────── воспроизведение ─────────
     fun play() {
         if (_state.value.clips.none { it.row == 0 }) return
         stopAtMs = -1
+        scrubEnd()                                                // доставить последнюю позицию перемотки
         if (_playhead.value >= _state.value.totalMs - 50) seekTo(0)
-        if (!playerReady) return                                  // композиция ещё готовится
-        player.play()
+        if (!playerReady) { playWhenReady = true; return }        // композиция ещё готовится: стартуем, как только будет READY
+        resumePlayer()
     }
 
-    fun pause() { runCatching { player.pause() }.onFailure { Log.w(TAG, "pause до подготовки плеера", it) } }
+    /** Play в любом состоянии: из IDLE — prepare, из ENDED — с начала, из BUFFERING — стартует сам по готовности. */
+    private fun resumePlayer() {
+        try {
+            when (player.playbackState) {
+                Player.STATE_IDLE -> { player.prepare(); player.play() }
+                Player.STATE_ENDED -> { player.seekTo(0); player.play() }
+                else -> player.play()
+            }
+        } catch (e: Exception) { Log.w(TAG, "play не удался", e); _events.tryEmit("Не удалось запустить воспроизведение") }
+    }
+
+    fun pause() { playWhenReady = false; runCatching { player.pause() }.onFailure { Log.w(TAG, "pause до подготовки плеера", it) } }
     fun toggle() { if (player.isPlaying) pause() else play() }
 
     /**
@@ -263,12 +294,48 @@ class TimelineController(
      * а пока плеер не готов — запоминается в [pendingSeekMs] и выполняется на первом STATE_READY.
      */
     fun seekTo(ms: Long) {
+        cancelScrub()
         val total = _state.value.totalMs
         val v = if (total > 0) ms.coerceIn(0L, total) else 0L
         _playhead.value = v
         if (total <= 0) return                                   // композиции ещё нет — перематывать нечего
         if (!playerReady || player.playbackState == Player.STATE_IDLE) { pendingSeekMs = v; return }
         seekPlayerSafely(v)
+    }
+
+    // ───────── живая перемотка пальцем ─────────
+    private var scrubTarget = -1L
+    private var scrubJob: Job? = null
+
+    /**
+     * Перемотка при ведении пальцем по таймлайну (десятки вызовов в секунду). Курсор в интерфейсе двигается сразу,
+     * а в плеер уходит не больше одного seek за [SCRUB_MS] (≈30 к/с) и всегда с самой свежей позицией:
+     * промежуточные цели отбрасываются, очередь не копится, главный поток не забивается командами.
+     */
+    fun scrubTo(ms: Long) {
+        val total = _state.value.totalMs
+        if (total <= 0) return
+        val v = ms.coerceIn(0L, total)
+        _playhead.value = v
+        scrubTarget = v
+        if (scrubJob?.isActive == true) return
+        scrubJob = scope.launch {
+            while (isActive && scrubTarget >= 0) {
+                val t = scrubTarget; scrubTarget = -1
+                if (!playerReady || player.playbackState == Player.STATE_IDLE) { pendingSeekMs = t } else seekPlayerSafely(t)
+                delay(SCRUB_MS)
+            }
+        }
+    }
+
+    /** Сбрасывает недоставленные цели перемотки (резкий свайп, play, явный seek). */
+    private fun cancelScrub() { scrubTarget = -1; scrubJob?.cancel(); scrubJob = null }
+
+    /** Палец отпущен: доставить последнюю позицию немедленно, не дожидаясь следующего тика. */
+    fun scrubEnd() {
+        val t = scrubTarget
+        cancelScrub()
+        if (t >= 0) { if (playerReady) seekPlayerSafely(t) else pendingSeekMs = t }
     }
 
     private fun seekPlayerSafely(v: Long) {
@@ -320,6 +387,7 @@ class TimelineController(
     override fun onIsPlayingChanged(isPlaying: Boolean) { _playing.value = isPlaying }
 
     override fun onPlaybackStateChanged(playbackState: Int) {
+        _buffering.value = playbackState == Player.STATE_BUFFERING
         when (playbackState) {
             Player.STATE_IDLE -> playerReady = false
             Player.STATE_READY, Player.STATE_ENDED -> {
@@ -331,6 +399,7 @@ class TimelineController(
                     if (total > 0 && p != player.currentPosition) seekPlayerSafely(p.coerceIn(0L, total)) else pendingSeekMs = -1
                 }
                 if (playbackState == Player.STATE_ENDED) { _playing.value = false; _playhead.value = _state.value.totalMs }
+                else if (playWhenReady) { playWhenReady = false; runCatching { player.play() } }   // отложенный Play
             }
             else -> Unit
         }
@@ -356,6 +425,8 @@ class TimelineController(
         const val TAG = "BaseTimeline"
         const val POLL_MS = 33L
         const val PREVIEW_PAD_MS = 400L
+        const val FRAME_REFRESH_MS = 120L
+        const val SCRUB_MS = 33L
         const val AUDIO_ROW = 1
         val CODEC_ERRORS = setOf(
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,

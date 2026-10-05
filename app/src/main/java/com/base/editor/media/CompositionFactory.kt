@@ -39,6 +39,11 @@ data class CompositionRequest(
     val captions: CaptionTrack? = null,
     /** Текстовые слои — тоже только в экспорт. */
     val texts: List<com.base.editor.text.TextClip> = emptyList(),
+    /**
+     * Превью: живой источник трансформации (clipId, локальное время клипа) → положение кадра. Матрица читает его на каждом
+     * кадре, поэтому правка положения/ключей не требует пересборки композиции. null — экспорт: берётся снимок [state].
+     */
+    val liveTransforms: ((Long, Long) -> com.base.editor.core.ClipTransform)? = null,
 )
 
 /**
@@ -80,8 +85,13 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
                 effects += Crop(-1f + 2f * c.left, -1f + 2f * c.right, 1f - 2f * c.bottom, 1f - 2f * c.top)
             }
             effects += (Presentation.createForWidthAndHeight(req.canvas.width, req.canvas.height, Presentation.LAYOUT_SCALE_TO_FIT))
+            val live = req.liveTransforms
             val keys = req.state.keyframes[clip.id].orEmpty()
-            if (keys.isNotEmpty()) effects += keyframeTransformEffect(keys, clip.startMs, req.canvas)
+            if (live != null) {
+                val startMs = clip.startMs; val id = clip.id
+                effects += MatrixTransformation { us -> transformMatrix(live(id, (us / 1000 - startMs).coerceAtLeast(0L)), req.canvas) }
+            }
+            else if (keys.isNotEmpty()) effects += keyframeTransformEffect(keys, clip.startMs, req.canvas)
             else req.state.transforms[clip.id]?.takeIf { !it.isIdentity }?.let { effects += clipTransformEffect(it, req.canvas) }
             if (!req.safeMode) {
                 inbound[clip.id]?.let { t ->

@@ -47,6 +47,7 @@ import kotlinx.coroutines.withContext
 interface TimelineActions {
     fun scrubStart()
     fun scrubTo(ms: Long)
+    fun scrubEnd()
     fun select(id: Long?)
     fun editBegin()
     fun moveClip(id: Long, startMs: Long)
@@ -192,8 +193,9 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     override fun scrubStart() = controller.pause()
     override fun scrubTo(ms: Long) {
         if (isLoading.value || controller.state.value.clips.isEmpty()) return   // нет композиции — нечего перематывать
-        controller.seekTo(snapToKeyframe(ms))
+        controller.scrubTo(snapToKeyframe(ms))
     }
+    override fun scrubEnd() = controller.scrubEnd()
 
     /** Курсор «считывает» ромбики выбранного клипа: рядом с ключом (±8 px шкалы) скраб прилипает к нему. */
     private fun snapToKeyframe(ms: Long): Long {
@@ -383,9 +385,9 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         val live = liveClipTransform.value
         if (live != null) {
             val applied = controller.appliedVersion.value
-            controller.commitEdit()
+            controller.commitTransformEdit()
             viewModelScope.launch {
-                val deadline = System.currentTimeMillis() + 2500
+                val deadline = System.currentTimeMillis() + 1000
                 while (controller.appliedVersion.value == applied && System.currentTimeMillis() < deadline) delay(40)
                 liveClipTransform.value = null
             }

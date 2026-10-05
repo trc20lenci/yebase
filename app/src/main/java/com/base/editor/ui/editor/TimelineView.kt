@@ -199,7 +199,12 @@ fun TimelineView(
                         Mode.SCROLL -> {                                            // инерция
                             val vMs = -tracker.calculateVelocity().x / cur.geo.pxPerMs
                             flingRef[0] = scope.launch {
-                                animateDecay(ph.toFloat(), vMs.toFloat(), FloatExponentialDecaySpec(frictionMultiplier = 1.6f)) { v, _ -> act.scrubTo(v.toLong()) }
+                                try {
+                                    animateDecay(ph.toFloat(), vMs.toFloat(), FloatExponentialDecaySpec(frictionMultiplier = 1.6f)) { v, _ ->
+                                        ph = v.toDouble().coerceIn(0.0, cur.totalMs.toDouble())
+                                        act.scrubTo(ph.toLong())
+                                    }
+                                } finally { act.scrubEnd() }       // последняя позиция — в плеер без задержки (в т.ч. при остановке касанием)
                             }
                         }
                         Mode.MOVE, Mode.TRIM_START, Mode.TRIM_END -> act.editEnd()
