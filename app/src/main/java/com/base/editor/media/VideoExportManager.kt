@@ -29,13 +29,15 @@ import java.util.Date
 import java.util.Locale
 
 enum class ExportQuality(val label: String, val shortSide: Int, val bitrate: Int) {
-    P720("720p", 720, 6_000_000), P1080("1080p", 1080, 12_000_000), P1440("2K", 1440, 20_000_000)
+    P480("480p", 480, 3_000_000), P720("720p", 720, 6_000_000), P1080("1080p", 1080, 12_000_000), P1440("2K", 1440, 20_000_000)
 }
 
 data class ExportRequest(
     val state: TimelineState,
     val aspect: Float,
     val quality: ExportQuality = ExportQuality.P1080,
+    /** Целевая частота кадров: 24 / 30 / 60. */
+    val fps: Int = 30,
     val hevc: Boolean = false,
     val removeAudio: Boolean = false,
     val captions: CaptionTrack? = null,
@@ -79,7 +81,7 @@ class VideoExportManager(
             val canvas = CompositionFactory.canvasFor(req.aspect, (req.quality.shortSide * scale).toInt())
             val output = outputFile()
             val composition: Composition? = runCatching {
-                factory.build(CompositionRequest(req.state, canvas, req.removeAudio, safeMode = simple, captions = req.captions, texts = req.texts))
+                factory.build(CompositionRequest(req.state, canvas, req.removeAudio, safeMode = simple, captions = req.captions, texts = req.texts, fps = req.fps))
             }.getOrNull()
             if (composition == null) { trySend(ExportState.Failed("Нет клипов для экспорта")); close(); return }
 

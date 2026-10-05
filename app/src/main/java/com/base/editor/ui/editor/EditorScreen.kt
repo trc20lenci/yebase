@@ -13,6 +13,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.rounded.AutoAwesome
 import androidx.compose.material.icons.rounded.Block
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Fullscreen
+import androidx.compose.material.icons.rounded.FullscreenExit
 import androidx.compose.material.icons.rounded.Crop
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
@@ -152,8 +154,10 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     export?.let { ExportDialog(it, onCancel = vm::cancelExport, onDismiss = vm::dismissExport) }
     LaunchedEffect(event) { event?.let { Toast.makeText(ctx, it, Toast.LENGTH_SHORT).show(); vm.events.value = null } }
     fun close() { vm.saveNow(); onClose() }
+    var fullscreen by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
     BackHandler {
         when {
+            fullscreen -> fullscreen = false
             draft != null -> vm.cancelText()
             formatPanel -> vm.closeFormat()
             captionPanel -> vm.closeCaptions()
@@ -167,7 +171,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
 
     Column(Modifier.fillMaxSize().background(BaseColors.DarkBg).systemBarsPadding()) {
         // верхняя панель
-        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        if (!fullscreen) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             RoundIcon(Icons.Rounded.Close, "Выйти", ::close)
             Spacer(Modifier.width(8.dp))
             Image(painterResource(R.drawable.logo_base_white), "BASE", Modifier.height(20.dp))
@@ -180,6 +184,18 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                 }
                 DropdownMenu(menu, { menu = false }) {
                     listOf("480p", "720p", "1080p", "2K/4K").forEach { r -> DropdownMenuItem(text = { Text(r) }, onClick = { vm.setResolution(r); menu = false }) }
+                }
+            }
+            Spacer(Modifier.width(6.dp))
+            var fpsMenu by remember { mutableStateOf(false) }
+            val fps by vm.exportFps.collectAsStateWithLifecycle()
+            Box {
+                Row(Modifier.clip(RoundedCornerShape(12.dp)).background(BaseColors.DarkPanel).clickable { fpsMenu = true }.padding(start = 12.dp, end = 6.dp, top = 9.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("$fps fps", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                    Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Color.White)
+                }
+                DropdownMenu(fpsMenu, { fpsMenu = false }) {
+                    listOf(24, 30, 60).forEach { f -> DropdownMenuItem(text = { Text("$f fps") }, onClick = { vm.setExportFps(f); fpsMenu = false }) }
                 }
             }
             Spacer(Modifier.width(10.dp))
@@ -222,8 +238,19 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
             val target = remember(selected, canvasText, draft, texts, liveClip, playhead, clips, clipAspects, cropClip) { vm.canvasTarget() }
             CanvasTransformOverlay(vm.videoAspect, target, visibleTexts, vm)
           }
+          // полноэкранный режим: иконка внизу справа; в полноэкранном — ещё Play/Pause и время
+          if (fullscreen) {
+              Row(Modifier.align(Alignment.BottomStart).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                  RoundIcon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Воспроизвести", vm::togglePlay, size = 48.dp)
+                  Text("  ${Format.duration(playhead)} / ${Format.duration(total)}", color = Color.White, fontSize = 14.sp)
+              }
+          }
+          Box(Modifier.align(Alignment.BottomEnd).padding(10.dp)) {
+              RoundIcon(if (fullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (fullscreen) "Выйти из полноэкранного режима" else "На весь экран", { fullscreen = !fullscreen })
+          }
         }
 
+        if (!fullscreen) {
         // время / play / undo-redo
         Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
             Row(Modifier.align(Alignment.CenterStart)) {
@@ -322,6 +349,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     onClose = vm::closeTransitions,
                 )
             }
+        }
         }
     }
 }

@@ -100,6 +100,9 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     val selectedId = MutableStateFlow<Long?>(null)
     val pxPerSec = MutableStateFlow(60f)                  // масштаб: dp на секунду
     val resolution = MutableStateFlow("720p")
+    /** Частота кадров экспорта: 24 / 30 / 60. */
+    val exportFps = MutableStateFlow(30)
+    fun setExportFps(f: Int) { exportFps.value = f.takeIf { it in listOf(24, 30, 60) } ?: 30 }
     val muted = MutableStateFlow(false)
     /** true, пока проект загружается: жесты перемотки в это время игнорируются. */
     val isLoading = MutableStateFlow(true)
@@ -447,11 +450,13 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     fun deleteText() { textDraft.value?.let { if (!it.isNew) controller.removeText(it.clip.id) }; textDraft.value = null; canvasTextId.value = null }
 
     // ───────── экспорт ─────────
-    fun startExport(quality: ExportQuality = ExportQuality.P1080) {
+    private fun exportQuality() = when (resolution.value) { "480p" -> ExportQuality.P480; "1080p" -> ExportQuality.P1080; "2K/4K" -> ExportQuality.P1440; else -> ExportQuality.P720 }
+
+    fun startExport(quality: ExportQuality = exportQuality()) {
         if (exportJob?.isActive == true) return
         controller.pause()
         val track = captions.items.value.takeIf { it.isNotEmpty() }?.let { CaptionTrack(it, captions.style.value) }
-        val request = ExportRequest(controller.state.value, aspect, quality, removeAudio = muted.value, captions = track, texts = controller.texts.value)
+        val request = ExportRequest(controller.state.value, aspect, quality, fps = exportFps.value, removeAudio = muted.value, captions = track, texts = controller.texts.value)
         exportJob = viewModelScope.launch {
             exporter.export(request).collect { s ->
                 exportState.value = s

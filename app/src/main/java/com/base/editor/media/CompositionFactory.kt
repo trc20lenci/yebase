@@ -44,6 +44,8 @@ data class CompositionRequest(
      * кадре, поэтому правка положения/ключей не требует пересборки композиции. null — экспорт: берётся снимок [state].
      */
     val liveTransforms: ((Long, Long) -> com.base.editor.core.ClipTransform)? = null,
+    /** Экспорт: целевой FPS (24/30/60). null — превью (30). */
+    val fps: Int? = null,
 )
 
 /**
@@ -102,7 +104,7 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
                 // захват хвоста — после перехода, чтобы в мост попал финальный кадр клипа
                 outbound[clip.id]?.let { effects += TailCaptureEffect(bridges.getOrPut(clip.id) { TransitionBridge() }) }
             }
-            seq.addItem(editedItem(clip, effects, req.removeAudio))
+            seq.addItem(editedItem(clip, effects, req.removeAudio, req.fps ?: FRAME_RATE))
             cursorMs = clip.endMs
         }
 
@@ -113,7 +115,7 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
             var cur = 0L
             for (c in music) {
                 if (c.startMs > cur) audioSeq.addGap((c.startMs - cur) * 1000)
-                audioSeq.addItem(editedItem(c, emptyList(), removeAudio = false))
+                audioSeq.addItem(editedItem(c, emptyList(), removeAudio = false, fps = req.fps ?: FRAME_RATE))
                 cur = c.endMs
             }
             Composition.Builder(seq.build(), audioSeq.build())
@@ -126,7 +128,13 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
             if (plain.isNotEmpty()) add(TextBitmapOverlay(context, plain, req.canvas))
             if (animated.isNotEmpty()) add(PagBitmapOverlay(context, animated, req.canvas))
         }
-        if (overlays.isNotEmpty()) builder.setEffects(Effects(emptyList(), listOf(OverlayEffect(overlays))))
+        // эффекты уровня композиции: наложения + ограничение FPS (24/30; для 60 кадры не добавляются —
+        // частота не может превысить частоту исходника, у фото она задаётся через setFrameRate)
+        val compEffects = buildList<Effect> {
+            if (overlays.isNotEmpty()) add(OverlayEffect(overlays))
+            req.fps?.takeIf { it < 60 }?.let { add(androidx.media3.effect.FrameDropEffect.createDefaultFrameDropEffect(it.toFloat())) }
+        }
+        if (compEffects.isNotEmpty()) builder.setEffects(Effects(emptyList(), compEffects))
         return builder.build()
     }
 
@@ -160,12 +168,12 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
         }
     }
 
-    private fun editedItem(c: Clip, videoEffects: List<Effect>, removeAudio: Boolean): EditedMediaItem {
+    private fun editedItem(c: Clip, videoEffects: List<Effect>, removeAudio: Boolean, fps: Int = FRAME_RATE): EditedMediaItem {
         val item = MediaItem.Builder().setUri(c.uri)
         val edited: EditedMediaItem.Builder
         if (c.type == MediaType.IMAGE) {
             item.setImageDurationMs(c.lengthMs)
-            edited = EditedMediaItem.Builder(item.build()).setDurationUs(c.lengthMs * 1000).setFrameRate(FRAME_RATE)
+            edited = EditedMediaItem.Builder(item.build()).setDurationUs(c.lengthMs * 1000).setFrameRate(fps)
         } else {
             item.setClippingConfiguration(
                 MediaItem.ClippingConfiguration.Builder()
@@ -176,7 +184,7 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
             // CompositionPlayer не читает длительность из файла: ему нужна ПОЛНАЯ длительность исходника
             // заранее (из неё он сам вычитает обрезку). Без этого — IllegalStateException в setComposition.
             val sourceMs = max(c.srcDurMs, c.srcInMs + c.lengthMs)
-            edited = EditedMediaItem.Builder(item.build()).setDurationUs(sourceMs * 1000).setFrameRate(FRAME_RATE)
+            edited = EditedMediaItem.Builder(item.build()).setDurationUs(sourceMs * 1000).setFrameRate(fps)
         }
         return edited.setEffects(Effects(emptyList(), videoEffects))
             .setRemoveAudio(removeAudio)
