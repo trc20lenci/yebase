@@ -71,7 +71,8 @@ import kotlin.math.roundToInt
  */
 @Composable
 fun TimelineView(
-    clips: List<Clip>, transitions: List<Transition>, captions: List<CaptionItem>, texts: List<TextClip>, selectedId: Long?, playheadMs: Long, totalMs: Long, pxPerSecDp: Float,
+    clips: List<Clip>, transitions: List<Transition>, captions: List<CaptionItem>, texts: List<TextClip>,
+    keyframes: Map<Long, List<com.base.editor.core.Keyframe>>, selectedId: Long?, playheadMs: Long, totalMs: Long, pxPerSecDp: Float,
     actions: TimelineActions, modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -82,7 +83,7 @@ fun TimelineView(
     var tick by remember { mutableIntStateOf(0) }          // перерисовка после подгрузки миниатюр
 
     val geo = Geo(density, widthPx.toFloat(), playheadMs, pxPerSecDp)
-    val cur by rememberUpdatedState(TlState(geo, clips, transitions, captions, texts, selectedId, totalMs))
+    val cur by rememberUpdatedState(TlState(geo, clips, transitions, captions, texts, keyframes, selectedId, totalMs))
     val act by rememberUpdatedState(actions)
 
     // Очередь миниатюр: draw только регистрирует недостающие ключи, загрузка — здесь.
@@ -246,7 +247,12 @@ class Geo(private val d: Density, val width: Float, val playheadMs: Long, val px
     val total: Float get() = audioTop + slotH
 }
 
-private class TlState(val geo: Geo, val clips: List<Clip>, val transitions: List<Transition>, val captions: List<CaptionItem>, val texts: List<TextClip>, val selectedId: Long?, val totalMs: Long) {
+private class TlState(
+    val geo: Geo, val clips: List<Clip>, val transitions: List<Transition>, val captions: List<CaptionItem>, val texts: List<TextClip>,
+    val keyframes: Map<Long, List<com.base.editor.core.Keyframe>>, val selectedId: Long?, val totalMs: Long,
+) {
+    val audioClips: List<Clip> = clips.filter { it.row != 0 && it.type == MediaType.AUDIO }.sortedBy { it.startMs }
+
     /** Стыки соседних клипов основной дорожки: (левый клип, правый клип). Кнопки скрыты у выбранного клипа. */
     fun junctions(): List<Pair<Clip, Clip>> {
         val main = clips.filter { it.row == 0 }
@@ -272,7 +278,18 @@ private class TlState(val geo: Geo, val clips: List<Clip>, val transitions: List
                 if (p.x in l..r) return Hit.Body(c)
             }
         }
-        if (p.y in g.audioTop..(g.audioTop + g.slotH) && p.x >= g.x(0)) return Hit.AudioSlot
+        if (p.y in g.audioTop..(g.audioTop + g.slotH)) {
+            audioClips.forEach { c ->
+                val l = g.x(c.startMs); val r = g.x(c.endMs)
+                if (c.id == selectedId) {
+                    val hw = min(g.handleW, (r - l) / 4)
+                    if (p.x in (l - g.handleSlop)..(l + hw + g.handleSlop / 2)) return Hit.Handle(c, true)
+                    if (p.x in (r - hw - g.handleSlop / 2)..(r + g.handleSlop)) return Hit.Handle(c, false)
+                }
+                if (p.x in l..r) return Hit.Body(c)
+            }
+            if (p.x >= g.x(0)) return Hit.AudioSlot
+        }
         if (p.y in g.textTop..(g.textTop + g.slotH)) {
             texts.lastOrNull { p.x in g.x(it.startMs)..g.x(it.endMs) }?.let { return Hit.Text(it.id) }
             if (p.x >= g.x(0)) return Hit.TextSlot
@@ -317,7 +334,7 @@ private fun DrawScope.drawTimeline(s: TlState, measurer: TextMeasurer, pending: 
     }
     slot(g.textTop, if (s.texts.isEmpty()) "+  Добавить текст" else null)
     slot(g.capTop, if (s.captions.isEmpty()) "Субтитры" else null)
-    slot(g.audioTop, "+  Добавить аудио")
+    slot(g.audioTop, if (s.audioClips.isEmpty()) "+  Добавить аудио" else null)
 
     fun block(top: Float, l: Float, r: Float, color: Color, label: String) {
         if (r < -20f || l > g.width + 20f || r - l < 2f) return
@@ -331,6 +348,20 @@ private fun DrawScope.drawTimeline(s: TlState, measurer: TextMeasurer, pending: 
     }
     s.texts.forEach { t -> block(g.textTop, g.x(t.startMs), g.x(t.endMs), Color(0xFFFF9800).copy(alpha = .55f), t.text) }
     s.captions.forEach { c -> block(g.capTop, g.x(c.startMs), g.x(c.endMs), BaseColors.Cyan.copy(alpha = .35f), c.text) }
+
+    // блоки музыки на аудиодорожке: имя файла + длительность; выбранный — с рамкой и ручками обрезки
+    s.audioClips.forEach { c ->
+        val l = g.x(c.startMs); val r = g.x(c.endMs)
+        val name = c.uri.substringAfterLast('/').substringBeforeLast('.').ifBlank { "Музыка" }
+        block(g.audioTop, l, r, Color(0xFF9C4DCC).copy(alpha = .55f), "♪ $name · ${Format.duration(c.lengthMs)}")
+        if (c.id == s.selectedId && r - l > 8f) {
+            val hw = min(g.handleW, (r - l) / 4)
+            val top = g.audioTop + 4.dp.toPx(); val hgt = g.slotH - 8.dp.toPx()
+            drawRoundRect(Color.White, Offset(l, top), Size(max(2f, r - l - 2f), hgt), CornerRadius(6.dp.toPx()), Stroke(2.dp.toPx()))
+            drawRoundRect(Color.White, Offset(l, top), Size(hw, hgt), CornerRadius(4.dp.toPx()))
+            drawRoundRect(Color.White, Offset(r - hw - 2f, top), Size(hw, hgt), CornerRadius(4.dp.toPx()))
+        }
+    }
 
     // клипы основной дорожки
     val tileW = g.mainH
@@ -379,6 +410,22 @@ private fun DrawScope.drawTimeline(s: TlState, measurer: TextMeasurer, pending: 
                 drawRoundRect(Color.Black.copy(alpha = .55f), Offset(bx, g.mainTop + 5.dp.toPx()), Size(m.size.width + 10.dp.toPx(), m.size.height + 4.dp.toPx()), CornerRadius(5.dp.toPx()))
                 drawText(m, topLeft = Offset(bx + 5.dp.toPx(), g.mainTop + 7.dp.toPx()))
             }
+        }
+    }
+
+    // маркеры ключевых кадров на полоске выбранного клипа (ромбики в точках timeMs)
+    s.clips.filter { it.row == 0 && it.id == s.selectedId }.forEach { c ->
+        val keys = s.keyframes[c.id].orEmpty()
+        val cy = g.mainTop + g.mainH / 2
+        val r = 5.dp.toPx()
+        keys.forEach { k ->
+            val x = g.x(c.startMs + k.timeMs)
+            if (x < -20f || x > g.width + 20f) return@forEach
+            val d = Path().apply { moveTo(x, cy - r); lineTo(x + r, cy); lineTo(x, cy + r); lineTo(x - r, cy); close() }
+            drawPath(d, Color.White)
+            val ri = r * 0.55f
+            val di = Path().apply { moveTo(x, cy - ri); lineTo(x + ri, cy); lineTo(x, cy + ri); lineTo(x - ri, cy); close() }
+            drawPath(di, BaseColors.Cyan)
         }
     }
 

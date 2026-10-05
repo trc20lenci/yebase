@@ -134,8 +134,14 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     val texts by vm.texts.collectAsStateWithLifecycle()
     val draft by vm.textDraft.collectAsStateWithLifecycle()
     val liveClip by vm.liveClipTransform.collectAsStateWithLifecycle()
+    val keyframes by vm.keyframes.collectAsStateWithLifecycle()
 
     SideEffect { vm.onRequestAddMedia = onAddMedia }
+    // выбор музыки с устройства (MIME audio/*) — результат уходит во ViewModel
+    val audioPicker = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let(vm::onAudioPicked) }
+    SideEffect { vm.onRequestAddAudio = { audioPicker.launch(arrayOf("audio/*")) } }
     LifecycleEventEffect(Lifecycle.Event.ON_STOP) { vm.scrubStart(); vm.saveNow() }
     val export by vm.exportState.collectAsStateWithLifecycle()
     export?.let { ExportDialog(it, onCancel = vm::cancelExport, onDismiss = vm::dismissExport) }
@@ -215,7 +221,14 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                 Text("  /  ${Format.duration(total)}", color = Color.White.copy(alpha = .5f), fontSize = 14.sp)
             }
             RoundIcon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Воспроизвести", vm::togglePlay, size = 52.dp)
-            Row(Modifier.align(Alignment.CenterEnd)) {
+            Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
+                // ромбик ключевого кадра: только когда выбран клип основной дорожки (режим «Изменить»)
+                val selMain = clips.firstOrNull { it.id == selected && it.row == 0 }
+                if (selMain != null) {
+                    val keyAtCursor = vm.hasKeyframeAtCursor()
+                    KeyframeButton(hasKey = keyAtCursor, onClick = vm::toggleKeyframe)
+                    Spacer(Modifier.width(4.dp))
+                }
                 RoundIcon(Icons.Rounded.Undo, "Отменить", vm::undo, enabled = canUndo)
                 RoundIcon(Icons.Rounded.Redo, "Повторить", vm::redo, enabled = canRedo)
             }
@@ -227,7 +240,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
         Box(Modifier.fillMaxWidth().height((TL_HEIGHT_DP + TOOLBAR_HEIGHT_DP).dp).background(BaseColors.DarkBg)) {
             Column(Modifier.fillMaxSize()) {
                 Box(Modifier.fillMaxWidth().height(TL_HEIGHT_DP.dp)) {
-                    TimelineView(clips, transitions, captionItems, texts, selected, playhead, total, zoom, vm, Modifier.fillMaxWidth())
+                    TimelineView(clips, transitions, captionItems, texts, keyframes, selected, playhead, total, zoom, vm, Modifier.fillMaxWidth())
                     // кнопка «звук клипа» слева от нулевой отметки — уезжает вместе со шкалой
                     val scrollPx = playhead * zoom * density.density / 1000f
                     Column(
@@ -249,7 +262,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     if (!hasSel) {
                         ToolRow {
                             ToolButton(Icons.Rounded.ContentCut, "Изменить") { vm.selectAtPlayhead() }
-                            ToolButton(Icons.Rounded.MusicNote, "Звук") { soon(ctx) }
+                            ToolButton(Icons.Rounded.MusicNote, "Звук", onClick = vm::addAudio)
                             ToolButton(Icons.Rounded.TextFields, "Текст", onClick = vm::openNewText)
                             ToolButton(Icons.Rounded.ClosedCaption, "Субтитры", onClick = vm::openCaptions)
                             ToolButton(Icons.Rounded.Layers, "Наложение") { soon(ctx) }
@@ -314,6 +327,30 @@ private fun ToolRow(content: @Composable RowScope.() -> Unit) {
 private fun RoundIcon(icon: ImageVector, desc: String, onClick: () -> Unit, size: androidx.compose.ui.unit.Dp = 44.dp, enabled: Boolean = true) {
     Box(Modifier.size(size).clip(CircleShape).alpha(if (enabled) 1f else .35f).clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
         Icon(icon, desc, tint = Color.White, modifier = Modifier.size(if (size > 48.dp) 34.dp else 26.dp))
+    }
+}
+
+/**
+ * Кнопка ключевого кадра (как в CapCut): ромбик с плюсом — ключа на курсоре нет (тап добавит),
+ * ромбик с минусом — курсор стоит на существующем ключе (тап удалит).
+ */
+@Composable
+private fun KeyframeButton(hasKey: Boolean, onClick: () -> Unit) {
+    Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+        androidx.compose.foundation.Canvas(Modifier.size(26.dp)) {
+            val w = size.width; val h = size.height
+            val cx = w / 2f; val cy = h / 2f
+            val r = w * 0.30f
+            val diamond = androidx.compose.ui.graphics.Path().apply {
+                moveTo(cx, cy - r); lineTo(cx + r, cy); lineTo(cx, cy + r); lineTo(cx - r, cy); close()
+            }
+            drawPath(diamond, if (hasKey) BaseColors.Cyan else Color.White)
+            // плюс или минус внутри ромбика
+            val ink = Color(0xFF111318)
+            val lw = w * 0.075f; val arm = r * 0.48f
+            drawLine(ink, androidx.compose.ui.geometry.Offset(cx - arm, cy), androidx.compose.ui.geometry.Offset(cx + arm, cy), lw)
+            if (!hasKey) drawLine(ink, androidx.compose.ui.geometry.Offset(cx, cy - arm), androidx.compose.ui.geometry.Offset(cx, cy + arm), lw)
+        }
     }
 }
 

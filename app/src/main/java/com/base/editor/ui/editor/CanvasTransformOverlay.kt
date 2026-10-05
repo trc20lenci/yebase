@@ -49,9 +49,13 @@ interface CanvasActions {
 }
 
 /**
- * Интерактивный слой поверх плеера. Один палец — перемещение, два — масштаб и вращение
- * (pan / pinch / rotate считаются теми же калькуляторами, что и detectTransformGestures, но с событием
- * «жест закончен», нужным для фиксации правки). Работает для выделенного клипа и для текстовых слоёв.
+ * Интерактивный слой поверх плеера. Логика жестов перенесена из PhotoEditor
+ * (MultiTouchListener.java, MIT): в начале касания запоминается исходная трансформация,
+ * дальше pan / pinch / rotate считаются как ПОЛНОЕ смещение жеста от этой точки
+ * (translate = base + pan, scale = base * zoom, rotation = base + angle) и применяются
+ * относительно ЦЕНТРА вписанного в кадр клипа — контейнер никогда не растягивается,
+ * пропорции исходника жёстко соблюдаются (ContentScale.Fit / Presentation.LAYOUT_SCALE_TO_FIT).
+ * Работает для выделенного клипа и для текстовых слоёв.
  * Выделенный элемент обводится рамкой с маркерами по углам.
  */
 @Composable
@@ -75,6 +79,7 @@ fun CanvasTransformOverlay(
                     val down = awaitFirstDown(requireUnconsumed = false)
                     var transforming = false
                     var accPan = Offset.Zero; var accZoom = 1f; var accRot = 0f
+                    var base: CanvasTarget? = null                 // состояние элемента на момент начала жеста
                     do {
                         val event = awaitPointerEvent()
                         val pan = event.calculatePan(); val zoom = event.calculateZoom(); val rot = event.calculateRotation()
@@ -82,21 +87,23 @@ fun CanvasTransformOverlay(
                         val t = currentTarget
                         if (!transforming && t != null &&
                             (accPan.getDistance() > slop || abs(accZoom - 1f) > 0.04f || abs(accRot) > 3f)) {
-                            transforming = true; act.onGestureStart()
+                            transforming = true; base = t; act.onGestureStart()
                         }
-                        if (transforming && t != null && event.changes.any { it.pressed }) {
+                        val b = base
+                        if (transforming && b != null && event.changes.any { it.pressed }) {
                             val w = size.width.toFloat(); val h = size.height.toFloat()
-                            when (t) {
-                                is CanvasTarget.Clip -> act.onClipTransform(t.id, t.transform.copy(
-                                    x = t.transform.x + pan.x / w, y = t.transform.y + pan.y / h,
-                                    scale = t.transform.scale * zoom, rotationDeg = t.transform.rotationDeg + rot,
+                            when (b) {
+                                // как в MultiTouchListener: от исходного состояния + суммарная дельта жеста
+                                is CanvasTarget.Clip -> act.onClipTransform(b.id, b.transform.copy(
+                                    x = b.transform.x + accPan.x / w, y = b.transform.y + accPan.y / h,
+                                    scale = b.transform.scale * accZoom, rotationDeg = b.transform.rotationDeg + accRot,
                                 ).sane())
-                                is CanvasTarget.Text -> act.onTextTransform(t.clip.copy(
-                                    positionX = (t.clip.positionX + pan.x / w).coerceIn(-0.2f, 1.2f),
-                                    positionY = (t.clip.positionY + pan.y / h).coerceIn(-0.2f, 1.2f),
-                                    fontSizeSp = (t.clip.fontSizeSp * zoom).coerceIn(8f, 160f),
-                                    rotationDeg = t.clip.rotationDeg + rot,
-                                ), t.isDraft)
+                                is CanvasTarget.Text -> act.onTextTransform(b.clip.copy(
+                                    positionX = (b.clip.positionX + accPan.x / w).coerceIn(-0.2f, 1.2f),
+                                    positionY = (b.clip.positionY + accPan.y / h).coerceIn(-0.2f, 1.2f),
+                                    fontSizeSp = (b.clip.fontSizeSp * accZoom).coerceIn(8f, 160f),
+                                    rotationDeg = b.clip.rotationDeg + accRot,
+                                ), b.isDraft)
                             }
                             event.changes.forEach { it.consume() }
                         }

@@ -49,6 +49,12 @@ data class CompositionRequest(
  *  • зазоры между клипами — addGap (чёрный кадр + тишина);
  *  • каждый клип приводится к общему холсту (Presentation, вписывание с полосами);
  *  • на стыках — TailCaptureEffect у уходящего и TransitionEffect у входящего клипа.
+ *
+ * Аудиодорожка (музыка) → вторая, ПАРАЛЛЕЛЬНАЯ последовательность (только TRACK_TYPE_AUDIO):
+ * Media3 микширует её со звуком основной дорожки и в превью (CompositionPlayer), и в экспорте.
+ *
+ * Ключевые кадры: если у клипа есть ключи, статическая трансформация заменяется на
+ * MatrixTransformation с линейной интерполяцией по времени кадра (KeyframeTrack.at).
  */
 @UnstableApi
 class CompositionFactory(private val context: Context, private val catalog: TransitionCatalog) {
@@ -68,7 +74,9 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
             if (clip.startMs > cursorMs) seq.addGap((clip.startMs - cursorMs) * 1000)
 
             val effects = mutableListOf<Effect>(Presentation.createForWidthAndHeight(req.canvas.width, req.canvas.height, Presentation.LAYOUT_SCALE_TO_FIT))
-            req.state.transforms[clip.id]?.takeIf { !it.isIdentity }?.let { effects += clipTransformEffect(it, req.canvas) }
+            val keys = req.state.keyframes[clip.id].orEmpty()
+            if (keys.isNotEmpty()) effects += keyframeTransformEffect(keys, clip.startMs, req.canvas)
+            else req.state.transforms[clip.id]?.takeIf { !it.isIdentity }?.let { effects += clipTransformEffect(it, req.canvas) }
             if (!req.safeMode) {
                 inbound[clip.id]?.let { t ->
                     catalog.spec(t.shaderId)?.let { spec ->
@@ -81,7 +89,19 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
             seq.addItem(editedItem(clip, effects, req.removeAudio))
             cursorMs = clip.endMs
         }
-        val builder = Composition.Builder(seq.build())
+
+        // музыка: параллельная последовательность только со звуком (видео у неё снято)
+        val music = req.state.clips.filter { it.row != 0 && it.type == MediaType.AUDIO }.sortedBy { it.startMs }
+        val builder = if (music.isEmpty()) Composition.Builder(seq.build()) else {
+            val audioSeq = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
+            var cur = 0L
+            for (c in music) {
+                if (c.startMs > cur) audioSeq.addGap((c.startMs - cur) * 1000)
+                audioSeq.addItem(editedItem(c, emptyList(), removeAudio = false))
+                cur = c.endMs
+            }
+            Composition.Builder(seq.build(), audioSeq.build())
+        }
         // эффект уровня композиции: время кадров — время всего проекта, слои совпадают с таймлайном
         val overlays = buildList<androidx.media3.effect.TextureOverlay> {
             req.captions?.takeIf { it.items.isNotEmpty() }?.let { add(CaptionBitmapOverlay(context, it, req.canvas)) }
@@ -98,16 +118,29 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
      * Положение кадра на холсте. Поворот считается в «квадратных» единицах (поправка на пропорции кадра),
      * иначе картинка перекашивалась бы. Размер кадра не меняется: лишнее обрезается, пустое заливается чёрным.
      */
-    private fun clipTransformEffect(t: ClipTransform, canvas: Size): Effect {
+    private fun clipTransformEffect(t: ClipTransform, canvas: Size): Effect =
+        MatrixTransformation { transformMatrix(t, canvas) }
+
+    /**
+     * Анимированная трансформация по ключевым кадрам: матрица вычисляется для каждого кадра.
+     * presentationTimeUs — время внутри последовательности; оно совпадает со шкалой таймлайна
+     * (основная дорожка собирается без ведущего зазора), поэтому локальное время клипа = t − clipStartMs.
+     * Интерполяция — линейная, как в Lottie BaseKeyframeAnimation: V1 + (V2 - V1) * progress.
+     */
+    private fun keyframeTransformEffect(keys: List<com.base.editor.core.Keyframe>, clipStartMs: Long, canvas: Size): Effect =
+        MatrixTransformation { presentationTimeUs ->
+            val localMs = (presentationTimeUs / 1000 - clipStartMs).coerceAtLeast(0L)
+            transformMatrix(com.base.editor.domain.KeyframeTrack.at(keys, localMs), canvas)
+        }
+
+    private fun transformMatrix(t: ClipTransform, canvas: Size): Matrix {
         val aspect = canvas.width.toFloat() / canvas.height
-        return MatrixTransformation {
-            Matrix().apply {
-                postScale(aspect, 1f)
-                postScale(t.scale, t.scale)
-                postRotate(-t.rotationDeg)                      // экранный поворот по часовой = против часовой в системе с осью Y вверх
-                postScale(1f / aspect, 1f)
-                postTranslate(t.x * 2f, -t.y * 2f)              // доля кадра → нормализованные координаты (ось Y вверх)
-            }
+        return Matrix().apply {
+            postScale(aspect, 1f)
+            postScale(t.scale, t.scale)
+            postRotate(-t.rotationDeg)                      // экранный поворот по часовой = против часовой в системе с осью Y вверх
+            postScale(1f / aspect, 1f)
+            postTranslate(t.x * 2f, -t.y * 2f)              // доля кадра → нормализованные координаты (ось Y вверх)
         }
     }
 
@@ -129,7 +162,10 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
             val sourceMs = max(c.srcDurMs, c.srcInMs + c.lengthMs)
             edited = EditedMediaItem.Builder(item.build()).setDurationUs(sourceMs * 1000).setFrameRate(FRAME_RATE)
         }
-        return edited.setEffects(Effects(emptyList(), videoEffects)).setRemoveAudio(removeAudio).build()
+        return edited.setEffects(Effects(emptyList(), videoEffects))
+            .setRemoveAudio(removeAudio)
+            .setRemoveVideo(c.type == MediaType.AUDIO)      // музыка идёт отдельной звуковой последовательностью
+            .build()
     }
 
     companion object {

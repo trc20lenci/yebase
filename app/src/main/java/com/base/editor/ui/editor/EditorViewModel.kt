@@ -86,6 +86,9 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     val clips: StateFlow<List<Clip>> = controller.state.map { it.clips }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val transitions: StateFlow<List<Transition>> = controller.state.map { it.transitions }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val totalMs: StateFlow<Long> = controller.state.map { it.totalMs }.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    /** Ключевые кадры клипов (clipId → ключи) — для ромбиков на дорожке и кнопки. */
+    val keyframes: StateFlow<Map<Long, List<com.base.editor.core.Keyframe>>> =
+        controller.state.map { it.keyframes }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
     val playheadMs = controller.playheadMs
     val isPlaying = controller.isPlaying
     val canUndo = controller.canUndo
@@ -117,6 +120,8 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     val videoAspect get() = controller.canvas.let { it.width.toFloat() / it.height }
 
     var onRequestAddMedia: (() -> Unit)? = null
+    /** Открыть системный выбор аудиофайла (подставляет экран). */
+    var onRequestAddAudio: (() -> Unit)? = null
     private var aspect = 9f / 16f
     private var exportJob: Job? = null
 
@@ -176,7 +181,19 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     override fun scrubStart() = controller.pause()
     override fun scrubTo(ms: Long) {
         if (isLoading.value || controller.state.value.clips.isEmpty()) return   // нет композиции — нечего перематывать
-        controller.seekTo(ms)
+        controller.seekTo(snapToKeyframe(ms))
+    }
+
+    /** Курсор «считывает» ромбики выбранного клипа: рядом с ключом (±8 px шкалы) скраб прилипает к нему. */
+    private fun snapToKeyframe(ms: Long): Long {
+        val id = selectedId.value ?: return ms
+        val clip = clips.value.firstOrNull { it.id == id } ?: return ms
+        val keys = keyframes.value[id].orEmpty()
+        if (keys.isEmpty()) return ms
+        val threshold = (8f / pxPerSec.value * 1000).toLong()
+        val hit = keys.minByOrNull { kotlin.math.abs(it.timeMs + clip.startMs - ms) } ?: return ms
+        val at = hit.timeMs + clip.startMs
+        return if (kotlin.math.abs(at - ms) <= threshold) at else ms
     }
     override fun select(id: Long?) { selectedId.value = id; if (id != null) canvasTextId.value = null }
     override fun editBegin() = controller.beginEdit()
@@ -186,8 +203,37 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     override fun editEnd() = controller.commitEdit()
     override fun setZoom(pxPerSecDp: Float) { pxPerSec.value = pxPerSecDp.coerceIn(12f, 400f) }
     override fun addMedia() { controller.pause(); onRequestAddMedia?.invoke() }
-    override fun addAudio() { events.value = "Аудиодорожка появится на следующем этапе" }
+    override fun addAudio() { onRequestAddAudio?.invoke() }
     override fun addText() { events.value = "Текстовые слои появятся на следующем этапе" }
+
+    /** URI аудиофайла из системного выбора аудио: проба длительности вне главного потока, затем блок на дорожке. */
+    fun onAudioPicked(uri: android.net.Uri) {
+        runCatching { getApplication<Application>().contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+        viewModelScope.launch {
+            val dur = withContext(dispatchers.default) { MediaProbe.audioDurationMs(getApplication(), uri.toString()) }
+            if (dur == null) events.value = "Не удалось прочитать аудиофайл" else controller.addAudio(uri.toString(), dur)
+        }
+    }
+
+    // ───────── ключевые кадры ─────────
+    /** Клип под курсором = выбранный клип ОСНОВНОЙ дорожки, и курсор внутри него (иначе ромбик недоступен). */
+    private fun selectedClipAtPlayhead(): Clip? {
+        val id = selectedId.value ?: return null
+        val t = playheadMs.value
+        return clips.value.firstOrNull { it.id == id && it.row == 0 && t >= it.startMs && t < it.endMs }
+    }
+
+    /** Есть ли ключ ровно под курсором плеера (для иконки «ромбик с минусом»). */
+    fun hasKeyframeAtCursor(): Boolean {
+        val clip = selectedClipAtPlayhead() ?: return false
+        return controller.keyframeAt(clip.id, playheadMs.value - clip.startMs) != null
+    }
+
+    /** Ромбик: нет ключа на этой миллисекунде — добавить; курсор стоит на ключе — удалить. */
+    fun toggleKeyframe() {
+        val clip = selectedClipAtPlayhead() ?: return
+        controller.toggleKeyframe(clip.id, playheadMs.value - clip.startMs)
+    }
 
     fun split() {
         val id = selectedId.value ?: return
@@ -233,35 +279,32 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     }
 
     // ───────── жесты на холсте ─────────
-    /** Реальные пропорции исходников (по uri); нужны, чтобы рамка выделения совпадала с вписанным кадром. */
-    val clipAspects = MutableStateFlow<Map<String, Float>>(emptyMap())
-    private val aspectRequested = HashSet<String>()
-    private fun loadClipAspect(c: Clip) {
-        if (!aspectRequested.add(c.uri)) return
-        viewModelScope.launch(Dispatchers.IO) {
-            MediaProbe.displaySize(getApplication(), c.uri, c.type)?.let { (w, h) ->
-                clipAspects.update { it + (c.uri to w.toFloat() / h) }
-            }
-        }
-    }
-
     /** Что выделено на холсте: слой текста (черновик имеет приоритет) или клип под курсором. */
     fun canvasTarget(): CanvasTarget? {
         textDraft.value?.let { return CanvasTarget.Text(it.clip, isDraft = true) }
         canvasTextId.value?.let { id -> controller.findText(id)?.let { return CanvasTarget.Text(it, isDraft = false) } }
-        val id = selectedId.value ?: return null
-        val clip = clips.value.firstOrNull { it.id == id && playheadMs.value >= it.startMs && playheadMs.value < it.endMs } ?: return null
-        val live = liveClipTransform.value?.takeIf { it.id == id }?.current
-        val aspect = clipAspects.value[clip.uri] ?: videoAspect.also { loadClipAspect(clip) }
-        return CanvasTarget.Clip(id, live ?: controller.state.value.transformOf(id), aspect)
+        val clip = selectedClipAtPlayhead() ?: return null
+        val live = liveClipTransform.value?.takeIf { it.id == clip.id }?.current
+        return CanvasTarget.Clip(clip.id, live ?: effectiveTransform(clip))
     }
+
+    /** Текущее положение кадра клипа: интерполяция по ключам на курсоре, иначе статическая трансформация. */
+    private fun effectiveTransform(clip: Clip): ClipTransform =
+        controller.state.value.transformAt(clip.id, playheadMs.value - clip.startMs)
 
     override fun onGestureStart() { controller.beginEdit() }
 
     override fun onClipTransform(clipId: Long, transform: ClipTransform) {
-        val baked = liveClipTransform.value?.takeIf { it.id == clipId }?.baked ?: controller.state.value.transformOf(clipId)
+        val clip = clips.value.firstOrNull { it.id == clipId } ?: return
+        val hasKeys = keyframes.value[clipId].orEmpty().isNotEmpty()
+        val baked = liveClipTransform.value?.takeIf { it.id == clipId }?.baked ?: effectiveTransform(clip)
         liveClipTransform.value = LiveClip(clipId, baked, transform)
-        controller.setClipTransform(clipId, transform)
+        if (hasKeys) {
+            // автоключ как в CapCut: любое движение кадра пальцем фиксирует ключ на текущей миллисекунде
+            controller.setKeyframeTransform(clipId, playheadMs.value - clip.startMs, transform)
+        } else {
+            controller.setClipTransform(clipId, transform)
+        }
     }
 
     override fun onTextTransform(clip: TextClip, isDraft: Boolean) {

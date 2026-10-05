@@ -34,6 +34,21 @@ data class ClipTransform(val x: Float = 0f, val y: Float = 0f, val scale: Float 
     fun sane() = copy(x = x.coerceIn(-2f, 2f), y = y.coerceIn(-2f, 2f), scale = scale.coerceIn(0.1f, 8f))
 }
 
+/**
+ * Ключевой кадр трансформации клипа (как в CapCut): значение [ClipTransform] в момент [timeMs].
+ * Время — от НАЧАЛА клипа на таймлайне (мс), поэтому ключи переживают сдвиг клипа по дорожке.
+ */
+data class Keyframe(
+    val timeMs: Long,
+    val x: Float,
+    val y: Float,
+    val scale: Float,
+    val rotationDeg: Float,
+) {
+    constructor(timeMs: Long, t: ClipTransform) : this(timeMs, t.x, t.y, t.scale, t.rotationDeg)
+    fun transform() = ClipTransform(x, y, scale, rotationDeg)
+}
+
 /** Файл, выбранный в галерее. */
 data class PickedMedia(val uri: String, val type: MediaType, val durationMs: Long) {
     fun encode() = "${type.code}|$durationMs|$uri"

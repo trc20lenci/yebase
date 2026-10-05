@@ -17,6 +17,11 @@ import kotlin.coroutines.coroutineContext
 /**
  * Локальное хранилище модели распознавания (filesDir/asr). Скачивание происходит тихо при первой генерации,
  * дальше модель берётся из кэша мгновенно. Файл проверяется по размеру и SHA-256.
+ *
+ * Модель — whisper-base (мультиязычная, ~74 млн параметров): в отличие от tiny, уверенно
+ * распознаёт русскую речь (мультиязычный словарь уже лежит в assets/asr). Конвертация TFLite
+ * из репозитория moonshine-ai/openai-whisper (бывш. usefulsensors) — тот же формат, что и у
+ * nyadla-sys/whisper.tflite: вход [1, 80, 3000] float32, выход — токены int32 [1, 448].
  */
 class WhisperModelStore(context: Context, private val io: CoroutineDispatcher = Dispatchers.IO) {
     private val dir = File(context.applicationContext.filesDir, "asr").apply { mkdirs() }
@@ -64,11 +69,11 @@ class WhisperModelStore(context: Context, private val io: CoroutineDispatcher = 
 
     private companion object {
         const val TAG = "BaseAsr"
-        const val FILE_NAME = "speech-tiny.tflite"
-        const val SIZE = 69_370_320L
-        const val SHA256 = "31679095a44c7278db4ad828d1c885805f8df66fa31fb8a2bf0f0851a6d0a380"
+        const val FILE_NAME = "whisper-base.tflite"
+        const val SIZE = 125_574_512L
+        const val SHA256 = "0e7f69754400516f71d0c80445c2ad8f3281b9dd23f24ed9958fb1c21f3b4804"
         const val ATTEMPTS = 3
-        // зафиксированная версия файла: содержимое по этому адресу не меняется
-        const val URL_PINNED = "https://raw.githubusercontent.com/nyadla-sys/whisper.tflite/064c2e1538cb59dcc3c3cb7c8fce2b8d39c6fc19/whisper_android/app/src/main/assets/whisper-tiny.tflite"
+        // зафиксированная версия файла (коммит aa21092, Git LFS): содержимое по этому адресу не меняется
+        const val URL_PINNED = "https://media.githubusercontent.com/media/moonshine-ai/openai-whisper/aa210925fbd524b8300603dd4fbd46a2639eae62/models/whisper-base.tflite"
     }
 }

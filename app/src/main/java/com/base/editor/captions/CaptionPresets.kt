@@ -1,9 +1,10 @@
 package com.base.editor.captions
 
 /**
- * Стили BASE для коротких вертикальных видео: ЗАГЛАВНЫЕ жирные буквы, контрастная чёрная обводка
- * (≈3–4 dp наружу), мягкая полупрозрачная тень без пересвета, неоновый акцент для звучащего слова
- * и пружинное «выпрыгивание» 1.0 → 1.15.
+ * Стили BASE для коротких вертикальных видео: ЗАГЛАВНЫЕ жирные буквы, чёткий чёрный контур
+ * (фиксированные 2.5 dp, круглые стыки — отрисовка как в Lottie TextLayer), аккуратная
+ * фиксированная тень (смещение 2 dp, чёрный 40%) БЕЗ размытия и белого пересвета,
+ * неоновый акцент для звучащего слова и пружинное «выпрыгивание» 1.0 → 1.15.
  */
 object CaptionPresets {
     private fun c(v: Long) = v.toInt()
@@ -13,7 +14,7 @@ object CaptionPresets {
     private val base = CaptionStyle(
         font = CaptionFont.MONTSERRAT, fontWeight = 900, uppercase = true, sizeFrac = 0.0625f,
         textColor = c(0xFFFFFFFF), strokeColor = c(0xFF000000), strokeEm = 0.09f,
-        shadowColor = c(0x59000000), shadowBlurEm = 0.12f, shadowDyEm = 0.05f,     // тень ≈ 35% — читаемость без свечения
+        shadowColor = c(0x66000000), shadowBlurEm = 0f, shadowDyEm = 0f,   // тень 40% без размытия — читаемость без свечения
         activeScale = 1.15f, maxWidthFrac = 0.90f, positionY = 0.78f,
     )
 

@@ -85,4 +85,15 @@ object MediaProbe {
             o.outWidth to o.outHeight
         }
     }.getOrNull()?.takeIf { it.first > 0 && it.second > 0 }
+
+    /** Длительность аудиофайла (мс) — для блока музыки на аудиодорожке. */
+    fun audioDurationMs(ctx: Context, uri: String): Long? = runCatching {
+        val r = MediaMetadataRetriever()
+        try {
+            r.setDataSource(ctx, Uri.parse(uri))
+            r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()
+        } finally {
+            r.release()
+        }
+    }.getOrNull()?.takeIf { it > 0 }
 }

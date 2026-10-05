@@ -14,6 +14,7 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.dp
 import kotlin.math.max
 import kotlin.math.min
 
@@ -67,7 +68,8 @@ object TextClipRenderer {
             val l = lay(measurer, clip)
             withTransform({ rotate(clip.rotationDeg, Offset(l.left + l.boxW / 2, l.top + l.boxH / 2)) }) {
                 if (clip.hasBackground) drawRoundRect(Color(clip.backgroundColor), Offset(l.left, l.top), Size(l.boxW, l.boxH), CornerRadius(l.fontPx * 0.3f))
-                val shadow = if (clip.hasBackground) null else Shadow(Color(0xAA000000), Offset(0f, l.fontPx * 0.05f), l.fontPx * 0.12f)
+                // фиксированная тень без размытия (offset 2 dp, чёрный 40%) — буквы не слипаются в кляксу
+                val shadow = if (clip.hasBackground) null else Shadow(Color(0x66000000), Offset(0f, 2.dp.toPx()), blurRadius = 0f)
                 drawText(l.layout, color = Color(clip.textColor), topLeft = Offset(l.left + l.padX, l.top + l.padY), shadow = shadow)
             }
         } catch (_: Exception) {

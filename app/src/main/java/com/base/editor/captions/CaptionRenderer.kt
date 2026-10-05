@@ -5,6 +5,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -15,6 +16,7 @@ import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.unit.Constraints
+import androidx.compose.ui.unit.dp
 import kotlin.math.cos
 import kotlin.math.exp
 import kotlin.math.sqrt
@@ -143,22 +145,24 @@ object CaptionRenderer {
     }
 
     private fun DrawScope.drawWord(layout: TextLayoutResult, style: CaptionStyle, fill: Int, topLeft: Offset, fontPx: Float) {
-        // 1) тень / свечение
-        if ((style.shadowColor ushr 24) > 0 && style.shadowBlurEm > 0f || (style.shadowColor ushr 24) > 0 && style.shadowDyEm != 0f) {
-            val sh = Shadow(Color(style.shadowColor), Offset(0f, style.shadowDyEm * fontPx), max(0.1f, style.shadowBlurEm * fontPx))
-            drawText(layout, color = Color(fill), topLeft = topLeft, shadow = sh)
-        }
-        // 2) обводка
+        // Рендеринг строго в два слоя (как TextLayer в Lottie): контур, затем чистая заливка.
+        // Никаких BlurMaskFilter и размытий: внутренние отверстия букв («о», «е», «а», «в») остаются чистыми.
+        // 1) контур: STROKE с круглыми стыками и окончаниями, толщина строго 2.5 dp
         if (style.strokeEm > 0f) {
             drawText(layout, color = Color(style.strokeColor), topLeft = topLeft,
-                drawStyle = Stroke(width = style.strokeEm * fontPx * 2f, join = StrokeJoin.Round))
+                drawStyle = Stroke(width = STROKE_DP.dp.toPx(), join = StrokeJoin.Round, cap = StrokeCap.Round))
         }
-        // 3) заливка
-        drawText(layout, color = Color(fill), topLeft = topLeft)
+        // 2) заливка основным цветом поверх контура + фиксированная тень (offset 2 dp, чёрный 40%), без пересвета
+        val shadow = if ((style.shadowColor ushr 24) > 0)
+            Shadow(Color(style.shadowColor), Offset(0f, SHADOW_DY_DP.dp.toPx()), blurRadius = 0f) else null
+        drawText(layout, color = Color(fill), topLeft = topLeft, shadow = shadow)
     }
 
     private const val ENTER_MS = 170f
     private const val RELEASE_MS = 140f
+    // геометрия контура и тени — фиксированная (в dp), как в эталонной отрисовке Lottie TextLayer
+    private const val STROKE_DP = 2.5f
+    private const val SHADOW_DY_DP = 2f
     private fun easeOut(t: Float) = 1f - (1f - t).pow(3)
 }
 

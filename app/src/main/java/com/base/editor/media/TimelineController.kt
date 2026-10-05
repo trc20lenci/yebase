@@ -165,6 +165,22 @@ class TimelineController(
     /** Положение кадра клипа на холсте: между beginEdit() и commitEdit() — без пересборки плеера. */
     fun setClipTransform(id: Long, t: ClipTransform) { if (model.setTransform(id, t)) publish() }
 
+    // ───────── ключевые кадры ─────────
+    /** Ключ под курсором (в локальном времени клипа) или null. */
+    fun keyframeAt(clipId: Long, localMs: Long) = model.keyframeAt(clipId, localMs)
+
+    /** Ромбик: ключа нет — добавить с текущим значением; курсор на ключе — удалить его. Возвращает true, если ключ добавлен. */
+    fun toggleKeyframe(clipId: Long, localMs: Long): Boolean {
+        pause(); model.checkpoint()
+        val added = model.toggleKeyframe(clipId, localMs)
+        model.discardCheckpointIfNoop()
+        afterStructuralEdit()
+        return added
+    }
+
+    /** Автоключ во время жеста трансформации: фиксирует новые координаты на текущей миллисекунде (без пересборки). */
+    fun setKeyframeTransform(clipId: Long, localMs: Long, t: ClipTransform) { if (model.setKeyframe(clipId, localMs, t)) publish() }
+
     fun split(id: Long): Boolean {
         pause(); model.checkpoint()
         if (model.split(id, _playhead.value) < 0) { model.discardCheckpointIfNoop(); return false }
@@ -183,6 +199,17 @@ class TimelineController(
         }
         afterStructuralEdit()
         seekTo(firstStart)
+    }
+
+    /** Музыка из файлов устройства: блок на аудиодорожке (row 1), старт — от курсора. */
+    fun addAudio(uri: String, srcDurMs: Long) {
+        if (srcDurMs <= 0) { _events.tryEmit("Не удалось прочитать аудиофайл"); return }
+        pause(); model.checkpoint()
+        val start = _playhead.value.coerceIn(0L, model.totalMs)
+        val id = model.addClip(AUDIO_ROW, MediaType.AUDIO, uri, srcDurMs, srcDurMs)
+        // блок ставится от курсора, а не в конец дорожки
+        if (model.state().clips.firstOrNull { it.id == id }?.startMs != start) model.moveClip(id, start, 0, -1)
+        afterStructuralEdit()
     }
 
     fun undo() { if (model.undo()) afterStructuralEdit() }
@@ -321,6 +348,7 @@ class TimelineController(
         const val TAG = "BaseTimeline"
         const val POLL_MS = 33L
         const val PREVIEW_PAD_MS = 400L
+        const val AUDIO_ROW = 1
         val CODEC_ERRORS = setOf(
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
             PlaybackException.ERROR_CODE_DECODING_FAILED,
