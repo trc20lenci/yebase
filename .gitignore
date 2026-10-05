@@ -6,3 +6,5 @@
 /build/
 /app/build/
 /app/.cxx/
+*.jks
+keystore_base64.txt
