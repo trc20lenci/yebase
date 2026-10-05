@@ -31,16 +31,12 @@ jobs:
 
       - name: Build Release Bundle (AAB)
         env:
-          KEYSTORE_PATH: "app/release-keystore.jks"
+          KEYSTORE_PATH: "release-keystore.jks"
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
-          ./gradlew bundleRelease \
-            -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
-            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
-            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
-            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
+          ./gradlew bundleRelease --stacktrace
 
       - name: Upload Signed AAB
         uses: actions/upload-artifact@v4
