@@ -1,6 +1,6 @@
 # BASE — архитектура проекта
 
-Android-видеоредактор: Kotlin, Jetpack Compose, Media3 (Transformer/CompositionPlayer), TFLite (LiteRT), libPAG.
+Android-видеоредактор: Kotlin, Jetpack Compose, Media3 (Transformer/CompositionPlayer), sherpa-onnx (распознавание речи), libPAG.
 minSdk 29, compileSdk 36, Kotlin 2.2.20, AGP 8.9.2, Gradle 8.11.1, Compose BOM 2024.12.01, Media3 1.11.1.
 
 ## 1. Структура пакетов и файлов
@@ -12,10 +12,11 @@ app/src/main/java/com/base/editor/
 ├── MainScreen.kt                — вкладки «Дом», «Проекты», «Я»
 ├── AppViewModel.kt
 ├── core/
-│   ├── Models.kt                — MediaType, Clip, Transition, ClipTransform, Keyframe, PickedMedia, ProjectMeta
+│   ├── Models.kt                — MediaType, Clip, Transition, ClipTransform, Keyframe, CropRect, PickedMedia, ProjectMeta
+│   ├── CanvasFormat.kt          — пресеты формата холста: Оригинал, 9:16, 16:9, 1:1, 4:5, 3:4
 │   └── TransitionCatalog.kt     — каталог 44 GLSL-переходов (assets/shaders/manifest.json)
 ├── domain/                      — чистый Kotlin без Android (покрыт юнит-тестами)
-│   ├── TimelineModel.kt         — дорожки, клипы, переходы, трансформации, ключевые кадры, undo/redo, сериализация V1
+│   ├── TimelineModel.kt         — дорожки, клипы, переходы, трансформации, ключевые кадры, кадрирование, undo/redo, сериализация V1
 │   └── KeyframeTrack.kt         — хранение и линейная интерполяция ключей (логика из Lottie keyframe, Apache 2.0)
 ├── media/
 │   ├── TimelineController.kt    — связь модели с CompositionPlayer, конвейер пересборки Composition
@@ -28,13 +29,14 @@ app/src/main/java/com/base/editor/
 │   └── gl/                      — TransitionEffect, TailCaptureEffect, TransitionBridge, GlBlit, GlSources
 ├── captions/
 │   ├── CaptionModels.kt         — CaptionItem, WordTimestamp, CaptionStyle, CaptionFont, WordAnimation
+│   ├── CaptionLanguage.kt       — Русский (ru) / Английский (en) / Авто
 │   ├── CaptionPresets.kt        — 4 стиля (неон #FFE600 / #00FF66)
 │   ├── CaptionOps.kt, CaptionSegmenter.kt, CaptionJson.kt, CaptionFonts.kt
 │   ├── CaptionRenderer.kt       — единый рисовальщик субтитров (превью = экспорт)
 │   ├── CaptionManager.kt        — владелец субтитров проекта (карточки, стиль, генерация)
-│   └── asr/                     — AudioPcmExtractor, SpeechActivity, WhisperFrontend,
-│                                  WhisperModelStore, WhisperTranscriber, AutoCaptionGenerator
-├── text/                        — TextClip, TextTrack, TextJson, TextClipRenderer
+│   └── asr/                     — AudioPcmExtractor, SpeechActivity, SherpaModelStore (загрузка модели),
+│                                  SherpaWhisper (OfflineRecognizer), WordTimings (токены → слова), AutoCaptionGenerator
+├── text/                        — TextClip (+fontId), TextTrack, TextJson, TextClipRenderer, TextFonts (8 шрифтов)
 ├── pag/                         — PagTemplateStore, PagTitles
 ├── data/
 │   ├── ProjectRepository.kt     — проекты: filesDir/projects/<id>.json (+ обложка .jpg)
@@ -49,15 +51,17 @@ app/src/main/java/com/base/editor/
         ├── EditorViewModel.kt   — состояние + TimelineActions + CanvasActions
         ├── TimelineView.kt      — многодорожечный таймлайн (Canvas): видео, текст, субтитры, аудио
         ├── CanvasTransformOverlay.kt — жесты на холсте (логика MultiTouchListener из PhotoEditor, MIT)
-        ├── CaptionOverlay.kt, CaptionPanel.kt
-        ├── TextOverlay.kt, TextEditorSheet.kt, PagTitleOverlay.kt
+        ├── CropDialog.kt        — кадрирование: рамка, сетка 3×3, угловые маркеры, пресеты пропорций
+        ├── CaptionOverlay.kt, CaptionPanel.kt (+ переключатель языка)
+        ├── TextOverlay.kt, PagTitleOverlay.kt
+        └── TextEditorSheet.kt   — TextInputSheet (строка ввода) и TextContextPanel (нижняя панель текста)
 ```
 
-Ресурсы: шрифты Montserrat/Oswald/Rubik/Russo One/Pacifico; `assets/shaders` (44 перехода + превью webp);
-`assets/asr/filters_vocab_multilingual.bin` (мел-фильтры и мультиязычный словарь Whisper).
+Ресурсы: шрифты Montserrat/Oswald/Rubik/Russo One/Pacifico; `assets/shaders` (44 перехода + превью webp).
+Модель распознавания в APK не входит — скачивается при первом запросе субтитров.
 
-Тесты (`app/src/test`): TimelineModelTest, KeyframeTrackTest (+ KeyframeModelTest, AudioTrackModelTest),
-CaptionLogicTest, TextTrackTest, SpeechActivityTest.
+Тесты (`app/src/test`): TimelineModelTest, KeyframeTrackTest, CaptionLogicTest, WordTimingsTest,
+TextTrackTest, SpeechActivityTest.
 
 ## 2. TimelineController ↔ Media3
 
@@ -71,8 +75,22 @@ CaptionLogicTest, TextTrackTest, SpeechActivityTest.
     на стыках — `TailCaptureEffect` + `TransitionEffect` (GLSL);
   - аудиодорожка (музыка) → вторая **параллельная** `EditedMediaItemSequence` (только `TRACK_TYPE_AUDIO`,
     `setRemoveVideo(true)`): Media3 микширует её со звуком клипов и в превью, и в экспорте;
+  - кадрирование клипа — `androidx.media3.effect.Crop` (границы в NDC) ставится ПЕРВЫМ в цепочке эффектов,
+    до вписывания в холст, поэтому `Presentation` вписывает уже обрезанный кадр;
+  - положение кадра (`ClipTransform`/ключи) — `MatrixTransformation`. В превью она читает актуальное состояние
+    модели на каждом кадре (`CompositionRequest.liveTransforms`), поэтому правка положения и ключей НЕ пересобирает
+    композицию: `TimelineController.commitTransformEdit()` перерисовывает текущий кадр перемоткой в ту же позицию.
+    В экспорте берётся снимок состояния;
+  - экспорт: `ExportRequest.fps` (24/30/60). Для 24 и 30 — `FrameDropEffect` на уровне композиции; для 60 кадры
+    не добавляются (частота не выше исходной), у фото `setFrameRate` берётся из выбора;
   - субтитры/текст/PAG — оверлеи уровня композиции (`OverlayEffect`), только в экспорте;
     в превью их рисует Compose поверх PlayerView.
+- **Перемотка** (`scrubTo`/`scrubEnd`): курсор в UI двигается сразу, в плеер уходит не больше одного `seekTo` за 33 мс
+  и всегда с последней позицией; промежуточные цели отбрасываются. `play()` работает из IDLE (prepare), ENDED
+  (с начала) и во время подготовки (отложенный старт); состояние буферизации — `isBuffering`.
+- **Формат холста** — `CanvasFormat` → `aspect` в `EditorViewModel` → `CompositionFactory.canvasFor`; хранится в проекте
+  (поле `format`). Окно предпросмотра меняет пропорции (`displayAspect`) только после применения новой композиции,
+  с анимацией; содержимое обрезается `clipToBounds()`.
 - **Экспорт** — `VideoExportManager` (Transformer → MP4), поток `Flow<ExportState>`,
   при сбое — повтор в упрощённом режиме (без эффектов, меньшее разрешение).
 
@@ -86,28 +104,38 @@ CaptionLogicTest, TextTrackTest, SpeechActivityTest.
   интерполяция `V1 + (V2 - V1)·t` (`KeyframeTrack.at`); в превью/экспорте её считает `MatrixTransformation`
   на каждый кадр. UI: кнопка-ромбик в строке с undo/redo (только когда клип выбран), маркеры-ромбики
   на полоске клипа, автоключ при любом движении кадра пальцем (если у клипа уже есть ключи).
+- **CropRect** — прямоугольник кадрирования в долях исходного кадра `left, top, right, bottom` (0..1),
+  хранится в `TimelineModel.crops: Map<clipId, CropRect>`; полный прямоугольник = «нет кадрирования».
+- **CanvasFormat** — пресет холста; `aspect = null` у «Оригинал» (пропорции первого клипа основной дорожки).
 - **AudioTrack** — это `Clip` с `row = 1, type = AUDIO`: перетаскивание по времени, обрезка краёв
   (ручки у выбранного блока), магнит к соседям. Добавление — кнопка «Звук» → системный выбор `audio/*`.
 - **CaptionItem / WordTimestamp** (= SubtitleSegment) — карточка субтитров + пословные тайминги;
   стиль — `CaptionStyle` (шрифт, цвета, анимация слова).
-- **TextClip** — текстовый слой: текст, интервал `startMs + durationMs`, позиция/размер/поворот,
-  опциональный PAG-шаблон.
+- **TextClip** — текстовый слой: текст, интервал `startMs + durationMs`, позиция/размер/поворот, цвета,
+  шрифт `fontId` (из `TextFonts`), опциональный PAG-шаблон. Редактирование: тап по тексту → нижняя панель
+  «Текст / Разделить / Шрифты / Стиль-Цвет / Удалить»; размер, поворот и положение — жестами на холсте.
 - **Transition** — переход «в» клип `rightId` на стыке с `leftId`: `shaderId`, `durationMs`.
 
 Сериализация таймлайна (формат V1, построчно): заголовок `V1`, строки клипов, `T` — переходы,
-`X` — статические трансформации, `K` — ключевые кадры. Субтитры и тексты — JSON-поля в файле проекта.
+`X` — статические трансформации, `K` — ключевые кадры, `C` — кадрирование (`C\tid\tl\tt\tr\tb`). Субтитры и тексты — JSON-поля в файле проекта.
 
 ## 4. Распознавание речи (автосубтитры)
 
-- Модель **whisper-base** (мультиязычная, поддерживает русский), TFLite-конвертация из
-  `moonshine-ai/openai-whisper` (тот же формат, что у nyadla-sys/whisper.tflite):
-  вход `[1, 80, 3000] float32`, выход — токены `int32 [1, 448]`.
-- `WhisperModelStore`: тихое скачивание (~126 МБ) в `filesDir/asr` при первой генерации,
-  проверка размера и SHA-256, в UI — только индикатор «Создание субтитров...».
-- `WhisperFrontend` — лог-мел-спектрограмма (как в эталоне), разбор токенов с мультиязычным словарём.
-- `SpeechActivity` — участки с голосом и оценка таймингов слов (±~50 мс, настоящих word-timestamps нет).
+- Движок — **k2-fsa/sherpa-onnx** (Apache 2.0), `OfflineRecognizer` с моделью **Whisper-base int8 (ONNX)**,
+  `enableTokenTimestamps = true`: токены приходят с метками времени, из них `WordTimings` собирает слова
+  (токен с пробелом в начале открывает слово). Если токены непригодны (размеры не совпали, разорванный символ UTF-8),
+  слова равномерно распределяются по окну — тайминги тогда приблизительные.
+- Язык (`CaptionLanguage`): «Русский» → `language = "ru"`, «Английский» → `"en"`, «Авто» → `""` (автоопределение Whisper).
+- `SherpaModelStore`: три файла (`base-encoder.int8.onnx`, `base-decoder.int8.onnx`, `base-tokens.txt`, ≈161 МБ)
+  скачиваются тихо в `filesDir/asr/whisper-base-int8` с `huggingface.co/csukuangfj/sherpa-onnx-whisper-base`.
+  Целостность: SHA-256 сверяется с заголовком `X-Linked-Etag` (для LFS-файлов это хеш содержимого), иначе — по размеру.
+  В UI — только индикатор «Создание субтитров…».
+- `AutoCaptionGenerator`: PCM из клипа → `SpeechActivity` режет на окна с голосом → `SherpaWhisper.transcribe` →
+  `WordTimings` → смещение на время клипа/окна → `CaptionSegmenter`. Фильтр зацикленных повторов.
 - Рендеринг (`CaptionRenderer`): контур STROKE 2.5 dp (join/cap ROUND) + чистая заливка поверх +
   фиксированная тень (offset 2 dp, чёрный 40%). Без BlurMaskFilter и размытий.
+- Не проверено на устройстве: качество русского у Whisper-base и точность токен-таймингов. Запасной вариант для
+  русского — модель GigaAM v2 (`sherpa-onnx-nemo-ctc-giga-am-v2-russian`) из релизов sherpa-onnx.
 
 ## 5. Сборка и библиотеки
 
@@ -116,13 +144,16 @@ CaptionLogicTest, TextTrackTest, SpeechActivityTest.
 ./gradlew testDebugUnitTest  # юнит-тесты (чистый Kotlin, без устройства)
 ```
 
-CI: `.github/workflows/build.yml` — сборка debug-APK и юнит-тесты на каждый пуш в main.
+CI: `.github/workflows/build.yml` — на каждый пуш в main: debug-APK, юнит-тесты (`testDebugUnitTest`) и подписанный AAB. Ошибки читаются через аннотации запуска.
+
+sherpa-onnx AAR (v1.13.8, ≈50 МБ) Gradle скачивает сам: задача `downloadSherpa` кладёт файл в `app/libs/` (в `.gitignore`)
+перед `preBuild`. Нужен доступ к github.com. ABI ограничены `arm64-v8a` и `armeabi-v7a`.
 
 Зависимости: Compose BOM 2024.12.01, Media3 1.11.1 (transformer, effect, exoplayer, ui, common),
-LiteRT 1.0.1 (TFLite), libpag 4.5.98, Navigation-Compose, Lifecycle. NDK нет.
+sherpa-onnx 1.13.8 (AAR с нативными библиотеками), libpag 4.5.98, Navigation-Compose, Lifecycle. NDK нет.
 
 Использованный открытый код (лицензии — в `licenses/NOTICE.txt`):
 - логика жестов холста — PhotoEditor (MIT), `MultiTouchListener.java`;
 - интерполяция ключевых кадров — Lottie (Apache 2.0), `animation/keyframe`;
-- модель Whisper TFLite и формат словаря — moonshine-ai/openai-whisper / nyadla-sys/whisper.tflite (MIT);
-- эталонные параметры фронтенда Whisper — openai/whisper, whisper.cpp.
+- распознавание речи — k2-fsa/sherpa-onnx (Apache 2.0), как внешняя зависимость без изменений;
+- модель Whisper (OpenAI, MIT) в ONNX int8 — csukuangfj/sherpa-onnx-whisper-base.
