@@ -120,11 +120,11 @@ fun TextContextPanel(
         }
         when (sub) {
             null -> Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
-                PanelAction("Текст", Icons.Rounded.Edit, onEditText)
-                PanelAction("Разделить", Icons.Rounded.VerticalSplit, onSplit, enabled = !isNew)
+                PanelAction("Текст", Icons.Rounded.Edit, onClick = onEditText)
+                PanelAction("Разделить", Icons.Rounded.VerticalSplit, enabled = !isNew, onClick = onSplit)
                 PanelAction("Шрифты", Icons.Rounded.TextFields) { sub = TextSub.FONTS }
                 PanelAction("Стиль/Цвет", Icons.Rounded.Palette) { sub = TextSub.STYLE }
-                PanelAction("Удалить", Icons.Rounded.DeleteOutline, onDelete)
+                PanelAction("Удалить", Icons.Rounded.DeleteOutline, onClick = onDelete)
             }
             TextSub.FONTS -> LazyRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(com.base.editor.text.TextFonts.all, key = { it.id }) { f ->
@@ -157,7 +157,7 @@ fun TextContextPanel(
 }
 
 @Composable
-private fun PanelAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit, enabled: Boolean = true) {
+private fun PanelAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, enabled: Boolean = true, onClick: () -> Unit) {
     Column(
         Modifier.clip(RoundedCornerShape(12.dp)).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 8.dp, vertical = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
