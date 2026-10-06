@@ -3,9 +3,9 @@ package com.base.editor.ui.editor
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
+import com.base.editor.ui.theme.BaseMotion
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
 import androidx.compose.foundation.lazy.LazyRow
@@ -110,6 +110,8 @@ import com.base.editor.captions.CaptionOps
 import androidx.compose.material.icons.rounded.ClosedCaption
 import com.base.editor.data.Format
 import com.base.editor.ui.theme.BaseColors
+import com.base.editor.ui.theme.animatedSelectColor
+import com.base.editor.ui.theme.pressable
 import com.base.editor.ui.theme.soon
 import kotlin.math.abs
 import androidx.compose.material.icons.rounded.Edit
@@ -186,20 +188,21 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
 
     Column(Modifier.fillMaxSize().background(BaseColors.DarkBg).systemBarsPadding()) {
         // верхняя панель: только выход, логотип и «Экспорт» — параметры рендера в отдельном листе
-        if (!fullscreen) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+        AnimatedVisibility(!fullscreen, enter = barEnter, exit = barExit) { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             RoundIcon(Icons.Rounded.Close, "Выйти", ::close)
             Spacer(Modifier.width(8.dp))
             Image(painterResource(R.drawable.logo_base_white), "BASE", Modifier.height(20.dp))
             Spacer(Modifier.weight(1f))
-            Text("Экспорт", Modifier.clip(RoundedCornerShape(12.dp)).background(BaseColors.Cyan).clickable(onClick = vm::openExportSheet).padding(horizontal = 18.dp, vertical = 10.dp),
+            Text("Экспорт", Modifier.pressable(onClick = vm::openExportSheet).clip(RoundedCornerShape(12.dp)).background(BaseColors.Cyan).padding(horizontal = 18.dp, vertical = 10.dp),
                 color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
-        }
+        } }
 
         // плеер занимает всё, что осталось над фиксированной нижней областью, поэтому его размер не меняется
         // ни при открытии панелей, ни при смене инструментов
         PreviewStage(vm, texts, captionItems, captionStyle, selected, fullscreen, { fullscreen = !fullscreen }, Modifier.weight(1f))
 
-        if (!fullscreen) {
+        AnimatedVisibility(!fullscreen, enter = barEnter, exit = barExit) {
+          Column {
             TransportRow(vm, hasMainSelected = clips.any { it.id == selected && it.row == 0 })
 
             // Нижняя область ФИКСИРОВАННОЙ высоты: таймлайн + панель инструментов. Таймлайн живой в любом режиме
@@ -286,12 +289,19 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     )
                 }
             }
+          }
         }
     }
 }
 
 /** Единая кривая появления/исчезновения панелей: сильный ease-out, 120–180 мс. */
-private val EaseOutStrong = androidx.compose.animation.core.CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
+private val EaseOutStrong = BaseMotion.EaseOut
+
+/** Панели скрываются/появляются при входе в полноэкранный режим: прозрачность + высота, 140–220 мс. */
+private val barEnter = androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(BaseMotion.ENTER_MS, easing = BaseMotion.EaseOut)) +
+    androidx.compose.animation.expandVertically(androidx.compose.animation.core.tween(BaseMotion.ENTER_MS, easing = BaseMotion.EaseOut))
+private val barExit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(BaseMotion.EXIT_MS, easing = BaseMotion.EaseOut)) +
+    androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(BaseMotion.EXIT_MS, easing = BaseMotion.EaseOut))
 
 private enum class ToolMode { MAIN, MEDIA, AUDIO, TEXT, CAPTION }
 
@@ -418,8 +428,8 @@ private fun TimelineHost(
         // кнопка «звук клипа» слева от нулевой отметки — уезжает вместе со шкалой
         val scrollPx = playhead * zoom * density.density / 1000f
         Column(
-            Modifier.offset { IntOffset(-scrollPx.roundToInt(), with(density) { 36.dp.roundToPx() }) }.padding(start = 12.dp).width(64.dp)
-                .clip(RoundedCornerShape(10.dp)).clickable(onClick = vm::toggleMute).padding(vertical = 4.dp),
+            Modifier.pressable(onClick = vm::toggleMute).offset { IntOffset(-scrollPx.roundToInt(), with(density) { 36.dp.roundToPx() }) }.padding(start = 12.dp).width(64.dp)
+                .clip(RoundedCornerShape(10.dp)).padding(vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
             Icon(if (muted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp, null, tint = Color.White, modifier = Modifier.size(26.dp))
@@ -427,8 +437,8 @@ private fun TimelineHost(
         }
         // «+» закреплён у правого края на уровне основной дорожки — доступен при любой прокрутке и зуме
         Box(
-            Modifier.align(Alignment.TopEnd).padding(top = 46.dp, end = 8.dp).size(44.dp)
-                .shadow(6.dp, CircleShape).clip(CircleShape).background(Color.White).clickable(onClick = vm::addMedia),
+            Modifier.pressable(onClick = vm::addMedia).align(Alignment.TopEnd).padding(top = 46.dp, end = 8.dp).size(44.dp)
+                .shadow(6.dp, CircleShape).clip(CircleShape).background(Color.White),
             contentAlignment = Alignment.Center,
         ) { Icon(Icons.Rounded.Add, "Добавить видео или фото", tint = Color.Black, modifier = Modifier.size(28.dp)) }
     }
@@ -449,9 +459,9 @@ private fun FormatPanel(current: com.base.editor.core.CanvasFormat, onPick: (com
             com.base.editor.core.CanvasFormat.entries.forEach { f ->
                 val on = f == current
                 Box(
-                    Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
-                        .background(if (on) BaseColors.Cyan else Color.White.copy(alpha = .1f))
-                        .clickable { onPick(f) }.padding(vertical = 12.dp),
+                    Modifier.pressable { onPick(f) }.weight(1f).clip(RoundedCornerShape(10.dp))
+                        .background(animatedSelectColor(on, offColor = Color.White.copy(alpha = .1f)))
+                        .padding(vertical = 12.dp),
                     contentAlignment = Alignment.Center,
                 ) { Text(f.label, color = if (on) Color.Black else Color.White, fontSize = 12.sp, fontWeight = FontWeight.Medium, maxLines = 1) }
             }
@@ -476,8 +486,12 @@ private fun ToolRow(content: @Composable RowScope.() -> Unit) {
 
 @Composable
 private fun RoundIcon(icon: ImageVector, desc: String, onClick: () -> Unit, size: androidx.compose.ui.unit.Dp = 44.dp, enabled: Boolean = true) {
-    Box(Modifier.size(size).clip(CircleShape).alpha(if (enabled) 1f else .35f).clickable(enabled = enabled, onClick = onClick), contentAlignment = Alignment.Center) {
-        Icon(icon, desc, tint = Color.White, modifier = Modifier.size(if (size > 48.dp) 34.dp else 26.dp))
+    val a by androidx.compose.animation.core.animateFloatAsState(if (enabled) 1f else .35f, androidx.compose.animation.core.tween(BaseMotion.STATE_MS, easing = BaseMotion.EaseOut), label = "iconAlpha")
+    Box(Modifier.pressable(enabled = enabled, onClick = onClick).size(size).clip(CircleShape).alpha(a), contentAlignment = Alignment.Center) {
+        // смена иконки (Play ↔ Pause, ромбик ключа) — короткий кроссфейд
+        Crossfade(icon, animationSpec = androidx.compose.animation.core.tween(BaseMotion.STATE_MS, easing = BaseMotion.EaseOut), label = "icon") {
+            Icon(it, desc, tint = Color.White, modifier = Modifier.size(if (size > 48.dp) 34.dp else 26.dp))
+        }
     }
 }
 
@@ -487,7 +501,7 @@ private fun RoundIcon(icon: ImageVector, desc: String, onClick: () -> Unit, size
  */
 @Composable
 private fun KeyframeButton(hasKey: Boolean, onClick: () -> Unit) {
-    Box(Modifier.size(44.dp).clip(CircleShape).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+    Box(Modifier.pressable(onClick = onClick).size(44.dp).clip(CircleShape), contentAlignment = Alignment.Center) {
         androidx.compose.foundation.Canvas(Modifier.size(26.dp)) {
             val w = size.width; val h = size.height
             val cx = w / 2f; val cy = h / 2f
@@ -508,7 +522,7 @@ private fun KeyframeButton(hasKey: Boolean, onClick: () -> Unit) {
 @Composable
 private fun RowScope.ToolButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Column(
-        Modifier.weight(1f).fillMaxHeight().clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick),
+        Modifier.pressable(onClick = onClick).weight(1f).fillMaxHeight().clip(RoundedCornerShape(12.dp)),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Icon(icon, null, tint = Color.White, modifier = Modifier.size(26.dp))
@@ -555,9 +569,9 @@ private fun TransitionPanel(
 @Composable
 private fun TransitionTile(label: String, icon: ImageVector, selected: Boolean, previewAsset: String? = null, onClick: () -> Unit) {
     Column(
-        Modifier.width(96.dp).clip(RoundedCornerShape(12.dp))
+        Modifier.pressable(onClick = onClick).width(96.dp).clip(RoundedCornerShape(12.dp))
             .border(BorderStroke(if (selected) 2.dp else 0.dp, if (selected) BaseColors.Cyan else Color.Transparent), RoundedCornerShape(12.dp))
-            .background(BaseColors.DarkSlot).clickable(onClick = onClick),
+            .background(BaseColors.DarkSlot),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(Modifier.fillMaxWidth().height(54.dp).background(Color(0xFF15161A)), contentAlignment = Alignment.Center) {

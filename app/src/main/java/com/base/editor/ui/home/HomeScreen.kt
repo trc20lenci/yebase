@@ -2,7 +2,6 @@ package com.base.editor.ui.home
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +16,8 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.base.editor.ui.theme.staggeredEnter
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
@@ -52,6 +53,7 @@ import com.base.editor.R
 import com.base.editor.core.ProjectMeta
 import com.base.editor.ui.projects.ProjectThumb
 import com.base.editor.ui.theme.BaseColors
+import com.base.editor.ui.theme.pressable
 import com.base.editor.ui.theme.soon
 
 private data class Tool(val label: String, val icon: ImageVector)
@@ -80,7 +82,7 @@ fun HomeScreen(
             Image(painterResource(R.drawable.logo_base_black), "BASE", Modifier.height(28.dp))
             Spacer(Modifier.weight(1f))
             Box(
-                Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).background(Color.White.copy(alpha = .7f)).clickable(onClick = onSeeAll),
+                Modifier.pressable(onClick = onSeeAll).size(44.dp).clip(RoundedCornerShape(22.dp)).background(Color.White.copy(alpha = .7f)),
                 contentAlignment = Alignment.Center,
             ) { Icon(Icons.Rounded.Search, "Поиск", tint = BaseColors.Ink) }
         }
@@ -94,8 +96,8 @@ fun HomeScreen(
         }
         Spacer(Modifier.height(20.dp))
         LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(projects.take(6), key = { it.id }) { p ->
-                Box(Modifier.size(88.dp).clip(RoundedCornerShape(14.dp)).clickable { onOpen(p.id) }) {
+            itemsIndexed(projects.take(6), key = { _, p -> p.id }) { i, p ->
+                Box(Modifier.staggeredEnter(i).pressable { onOpen(p.id) }.size(88.dp).clip(RoundedCornerShape(14.dp))) {
                     ProjectThumb(p, Modifier.fillMaxSize())
                     Row(Modifier.align(Alignment.BottomStart).padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(Icons.Rounded.ContentCut, null, tint = Color.White, modifier = Modifier.size(12.dp))
@@ -105,7 +107,7 @@ fun HomeScreen(
                 }
             }
             if (projects.size > 6) item {
-                Box(Modifier.size(88.dp).clip(RoundedCornerShape(14.dp)).background(BaseColors.Line).clickable(onClick = onSeeAll), contentAlignment = Alignment.Center) {
+                Box(Modifier.pressable(onClick = onSeeAll).size(88.dp).clip(RoundedCornerShape(14.dp)).background(BaseColors.Line), contentAlignment = Alignment.Center) {
                     Icon(Icons.Rounded.ChevronRight, "Все проекты")
                 }
             }
@@ -114,7 +116,7 @@ fun HomeScreen(
         tools.chunked(3).forEach { rowTools ->
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
                 rowTools.forEach { t ->
-                    Column(Modifier.weight(1f).clip(RoundedCornerShape(12.dp)).clickable { soon(ctx) }.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                    Column(Modifier.pressable { soon(ctx) }.weight(1f).clip(RoundedCornerShape(12.dp)).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(t.icon, null, Modifier.size(30.dp), tint = BaseColors.Ink.copy(alpha = .8f))
                         Spacer(Modifier.height(8.dp))
                         Text(t.label, fontSize = 13.sp, color = BaseColors.Ink.copy(alpha = .75f), textAlign = TextAlign.Center, minLines = 2, maxLines = 2)
@@ -129,7 +131,7 @@ fun HomeScreen(
 @Composable
 private fun BigAction(label: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
     Column(
-        modifier.height(120.dp).clip(RoundedCornerShape(22.dp)).background(Color.White).clickable(onClick = onClick).padding(12.dp),
+        modifier.pressable(onClick = onClick).height(120.dp).clip(RoundedCornerShape(22.dp)).background(Color.White).padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Box(Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(BaseColors.Ink), contentAlignment = Alignment.Center) {

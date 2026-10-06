@@ -4,7 +4,6 @@ import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,6 +17,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import com.base.editor.ui.theme.staggeredEnter
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -53,6 +54,7 @@ import androidx.compose.ui.unit.sp
 import com.base.editor.core.ProjectMeta
 import com.base.editor.data.Format
 import com.base.editor.ui.theme.BaseColors
+import com.base.editor.ui.theme.pressable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -82,7 +84,7 @@ fun ProjectsScreen(projects: List<ProjectMeta>, onCreate: () -> Unit, onOpen: (S
                             if (query.isNullOrEmpty()) Text("Поиск по названию", color = BaseColors.Muted, fontSize = 16.sp)
                             BasicTextField(query.orEmpty(), { query = it }, singleLine = true, textStyle = TextStyle(fontSize = 16.sp, color = BaseColors.Ink), cursorBrush = SolidColor(BaseColors.Ink))
                         }
-                        Icon(Icons.Rounded.Close, "Закрыть поиск", Modifier.size(20.dp).clickable { query = null })
+                        Icon(Icons.Rounded.Close, "Закрыть поиск", Modifier.pressable { query = null }.size(20.dp))
                     }
                 }
                 if (query == null) IconBox(Icons.Rounded.Search, "Поиск") { query = "" }
@@ -96,8 +98,8 @@ fun ProjectsScreen(projects: List<ProjectMeta>, onCreate: () -> Unit, onOpen: (S
             LazyRow(contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(Filter.entries) { f ->
                     val sel = f == filter
-                    Text(f.label, Modifier.clip(RoundedCornerShape(18.dp)).border(1.5.dp, if (sel) BaseColors.Ink else BaseColors.Line, RoundedCornerShape(18.dp))
-                        .clickable { filter = f }.padding(horizontal = 22.dp, vertical = 10.dp),
+                    Text(f.label, Modifier.pressable { filter = f }.clip(RoundedCornerShape(18.dp)).border(1.5.dp, if (sel) BaseColors.Ink else BaseColors.Line, RoundedCornerShape(18.dp))
+                        .padding(horizontal = 22.dp, vertical = 10.dp),
                         fontSize = 16.sp, color = BaseColors.Ink, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal)
                 }
             }
@@ -107,12 +109,12 @@ fun ProjectsScreen(projects: List<ProjectMeta>, onCreate: () -> Unit, onOpen: (S
                     Text(if (projects.isEmpty()) "Проектов пока нет. Нажмите «Создать», чтобы выбрать видео или фото." else "Ничего не найдено.", color = BaseColors.Muted, fontSize = 15.sp)
                 }
             } else LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 12.dp, bottom = 100.dp)) {
-                items(shown, key = { it.id }) { p -> ProjectRow(p, onOpen = { onOpen(p.id) }, onDelete = { onDelete(p.id) }) }
+                itemsIndexed(shown, key = { _, p -> p.id }) { i, p -> Box(Modifier.staggeredEnter(i)) { ProjectRow(p, onOpen = { onOpen(p.id) }, onDelete = { onDelete(p.id) }) } }
             }
         }
         Row(
-            Modifier.align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 20.dp).clip(RoundedCornerShape(30.dp)).background(BaseColors.Cyan)
-                .clickable(onClick = onCreate).padding(horizontal = 26.dp, vertical = 16.dp),
+            Modifier.pressable(onClick = onCreate).align(Alignment.BottomEnd).padding(end = 20.dp, bottom = 20.dp).clip(RoundedCornerShape(30.dp)).background(BaseColors.Cyan)
+                .padding(horizontal = 26.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(Icons.Rounded.Add, null, tint = Color.Black)
@@ -124,7 +126,7 @@ fun ProjectsScreen(projects: List<ProjectMeta>, onCreate: () -> Unit, onOpen: (S
 
 @Composable
 private fun IconBox(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, onClick: () -> Unit) {
-    Box(Modifier.size(44.dp).clip(RoundedCornerShape(22.dp)).clickable(onClick = onClick), contentAlignment = Alignment.Center) {
+    Box(Modifier.pressable(onClick = onClick).size(44.dp).clip(RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) {
         Icon(icon, desc, tint = BaseColors.Ink)
     }
 }
@@ -132,7 +134,7 @@ private fun IconBox(icon: androidx.compose.ui.graphics.vector.ImageVector, desc:
 @Composable
 private fun ProjectRow(p: ProjectMeta, onOpen: () -> Unit, onDelete: () -> Unit) {
     var menu by remember { mutableStateOf(false) }
-    Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).clickable(onClick = onOpen).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.pressable(onClick = onOpen).fillMaxWidth().clip(RoundedCornerShape(14.dp)).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         ProjectThumb(p, Modifier.size(80.dp).clip(RoundedCornerShape(14.dp)))
         Column(Modifier.weight(1f).padding(start = 16.dp)) {
             Text(p.name, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = BaseColors.Ink)

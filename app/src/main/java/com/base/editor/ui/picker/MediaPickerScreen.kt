@@ -9,7 +9,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -58,6 +57,7 @@ import com.base.editor.data.Format
 import com.base.editor.data.MediaRepository
 import com.base.editor.data.Thumbs
 import com.base.editor.ui.theme.BaseColors
+import com.base.editor.ui.theme.pressable
 
 private fun mediaPermissions(): Array<String> = when {
     Build.VERSION.SDK_INT >= 34 -> arrayOf(Manifest.permission.READ_MEDIA_VIDEO, Manifest.permission.READ_MEDIA_IMAGES, Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
@@ -79,11 +79,11 @@ fun MediaPickerScreen(startOnPhotos: Boolean, onClose: () -> Unit, onConfirm: (L
 
     Column(Modifier.fillMaxSize().background(BaseColors.DarkBg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.size(48.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Close, "Закрыть", tint = Color.White) }
+            Box(Modifier.pressable(onClick = onClose).size(48.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Close, "Закрыть", tint = Color.White) }
         }
         Row(Modifier.fillMaxWidth()) {
             listOf("Видео", "Фото").forEachIndexed { i, label ->
-                Column(Modifier.weight(1f).clickable { tab = i }.padding(top = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(Modifier.pressable { tab = i }.weight(1f).padding(top = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text(label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = if (tab == i) BaseColors.Cyan else Color.White.copy(alpha = .6f))
                     Box(Modifier.padding(top = 8.dp).height(3.dp).size(width = 44.dp, height = 3.dp).background(if (tab == i) BaseColors.Cyan else Color.Transparent))
                 }
@@ -118,7 +118,7 @@ fun MediaPickerScreen(startOnPhotos: Boolean, onClose: () -> Unit, onConfirm: (L
 private fun MediaCell(m: DeviceMedia, order: Int, onToggle: () -> Unit) {
     val ctx = LocalContext.current
     val thumb by produceState<com.base.editor.data.Thumb?>(null, m.uri) { value = Thumbs.poster(ctx, m.uri, 320) }
-    Box(Modifier.fillMaxWidth().aspectRatio(1f).background(BaseColors.TileEmpty).clickable(onClick = onToggle)) {
+    Box(Modifier.pressable(onClick = onToggle).fillMaxWidth().aspectRatio(1f).background(BaseColors.TileEmpty)) {
         thumb?.let { Image(it.image, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop) }
         if (m.durationMs > 0) Text(Format.duration(m.durationMs), Modifier.align(Alignment.BottomEnd).padding(6.dp), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Box(

@@ -1,7 +1,6 @@
 package com.base.editor.ui.editor
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -32,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.base.editor.media.ExportQuality
 import com.base.editor.ui.theme.BaseColors
+import com.base.editor.ui.theme.pressable
 import kotlin.math.roundToInt
 
 private class Res(val key: String, val label: String, val quality: ExportQuality)
@@ -60,8 +60,8 @@ fun ExportSheet(durationMs: Long, initialResolution: String, initialFps: Int, on
             if (FPS_OPTIONS[fpsIdx] == 60) Text("60 fps не добавляет кадры у видео с меньшей частотой", color = Color.White.copy(alpha = .55f), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             Spacer(Modifier.height(20.dp))
             Box(
-                Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(BaseColors.Cyan)
-                    .clickable { onStart(RESOLUTIONS[resIdx].key, FPS_OPTIONS[fpsIdx]) }.padding(vertical = 16.dp),
+                Modifier.pressable { onStart(RESOLUTIONS[resIdx].key, FPS_OPTIONS[fpsIdx]) }.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(BaseColors.Cyan)
+                    .padding(vertical = 16.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

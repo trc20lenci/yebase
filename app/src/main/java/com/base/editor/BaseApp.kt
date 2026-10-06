@@ -21,6 +21,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavType
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.tween
+import com.base.editor.ui.theme.BaseMotion
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -53,7 +58,15 @@ fun BaseApp() {
     LaunchedEffect(Unit) { delay(900); splash = false }
 
     Box(Modifier.fillMaxSize().background(Color.Black)) {
-        NavHost(nav, startDestination = Routes.MAIN) {
+        // «fade through»: уходящий экран быстро гаснет, новый появляется с лёгким увеличением (ease-out, ≤ 250 мс)
+        val ease = BaseMotion.EaseOut
+        NavHost(
+            nav, startDestination = Routes.MAIN,
+            enterTransition = { fadeIn(tween(BaseMotion.ENTER_MS, delayMillis = 70, easing = ease)) + scaleIn(tween(BaseMotion.ENTER_MS + 40, delayMillis = 70, easing = ease), initialScale = 0.97f) },
+            exitTransition = { fadeOut(tween(90, easing = ease)) },
+            popEnterTransition = { fadeIn(tween(BaseMotion.ENTER_MS, delayMillis = 70, easing = ease)) },
+            popExitTransition = { fadeOut(tween(BaseMotion.EXIT_MS, easing = ease)) + scaleOut(tween(BaseMotion.EXIT_MS, easing = ease), targetScale = 0.97f) },
+        ) {
             composable(Routes.MAIN) {
                 BaseTheme(dark = false) {
                     MainScreen(

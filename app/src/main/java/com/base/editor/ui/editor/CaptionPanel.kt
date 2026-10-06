@@ -3,7 +3,6 @@ package com.base.editor.ui.editor
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -59,6 +58,8 @@ import com.base.editor.captions.WordTimestamp
 import androidx.compose.foundation.layout.height
 import com.base.editor.data.Format
 import com.base.editor.ui.theme.BaseColors
+import com.base.editor.ui.theme.animatedSelectColor
+import com.base.editor.ui.theme.pressable
 
 private val Palette = listOf(
     0xFFFFFFFF, 0xFF000000, 0xFFFFEB3B, 0xFFFF6D00, 0xFFFF1744, 0xFFFF2DF1,
@@ -93,11 +94,11 @@ fun CaptionPanel(
     Column(Modifier.fillMaxWidth().background(BaseColors.DarkPanel).padding(top = 6.dp, bottom = 8.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf("Текст", "Стиль").forEachIndexed { i, t ->
-                Text(t, Modifier.clip(RoundedCornerShape(10.dp)).clickable { tab = i }.padding(horizontal = 14.dp, vertical = 8.dp),
+                Text(t, Modifier.pressable { tab = i }.clip(RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
                     color = if (tab == i) BaseColors.Cyan else Color.White.copy(alpha = .7f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.weight(1f))
-            Box(Modifier.size(40.dp).clip(CircleShape).clickable(onClick = onClose), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Check, "Готово", tint = Color.White) }
+            Box(Modifier.pressable(onClick = onClose).size(40.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Check, "Готово", tint = Color.White) }
         }
         Box(Modifier.heightIn(max = 250.dp).fillMaxWidth()) {
             if (tab == 0) TextTab(items, generation, playheadMs, language, onLanguage, onGenerate, onDismissError, onOpenItem, onAdd, onClearAll)
@@ -123,34 +124,34 @@ private fun TextTab(
             }
             else -> {
                 if (generation is GenerationState.Failed) {
-                    Text(generation.message, color = Color(0xFFFF8A80), fontSize = 13.sp, modifier = Modifier.clickable(onClick = onDismissError).padding(vertical = 4.dp))
+                    Text(generation.message, color = Color(0xFFFF8A80), fontSize = 13.sp, modifier = Modifier.pressable(onClick = onDismissError).padding(vertical = 4.dp))
                 }
                 // язык речи: «Русский» принудительно включает русский режим модели, «Авто» — определение по звуку
                 Row(Modifier.padding(bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     com.base.editor.captions.CaptionLanguage.entries.forEach { l ->
                         val on = l == language
-                        Text(l.label, Modifier.clip(RoundedCornerShape(10.dp)).background(if (on) BaseColors.Cyan else BaseColors.DarkSlot)
-                            .clickable { onLanguage(l) }.padding(horizontal = 12.dp, vertical = 8.dp),
+                        Text(l.label, Modifier.pressable { onLanguage(l) }.clip(RoundedCornerShape(10.dp)).background(animatedSelectColor(on))
+                            .padding(horizontal = 12.dp, vertical = 8.dp),
                             color = if (on) Color.Black else Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.weight(1f))
-                    Text(if (items.isEmpty()) "Создать субтитры" else "Создать заново", Modifier.clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).clickable(onClick = onGenerate)
+                    Text(if (items.isEmpty()) "Создать субтитры" else "Создать заново", Modifier.pressable(onClick = onGenerate).clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan)
                         .padding(horizontal = 16.dp, vertical = 9.dp), color = Color.Black, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 }
             }
         }
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(Modifier.clip(RoundedCornerShape(10.dp)).background(BaseColors.DarkSlot).clickable(onClick = onAdd).padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.pressable(onClick = onAdd).clip(RoundedCornerShape(10.dp)).background(BaseColors.DarkSlot).padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(Icons.Rounded.Add, null, tint = Color.White, modifier = Modifier.size(18.dp)); Text(" Добавить здесь", color = Color.White, fontSize = 13.sp)
             }
-            if (items.isNotEmpty()) Text("Удалить все", Modifier.clip(RoundedCornerShape(10.dp)).background(BaseColors.DarkSlot).clickable(onClick = onClearAll).padding(horizontal = 12.dp, vertical = 8.dp), color = Color(0xFFFF8A80), fontSize = 13.sp)
+            if (items.isNotEmpty()) Text("Удалить все", Modifier.pressable(onClick = onClearAll).clip(RoundedCornerShape(10.dp)).background(BaseColors.DarkSlot).padding(horizontal = 12.dp, vertical = 8.dp), color = Color(0xFFFF8A80), fontSize = 13.sp)
         }
         LazyColumn(Modifier.padding(top = 6.dp), contentPadding = PaddingValues(bottom = 4.dp)) {
             items(items, key = { it.id }) { c ->
                 val now = playheadMs >= c.startMs && playheadMs < c.endMs
-                Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (now) BaseColors.Cyan.copy(alpha = .18f) else Color.Transparent).clickable { onOpen(c) }.padding(horizontal = 8.dp, vertical = 8.dp)) {
+                Row(Modifier.pressable { onOpen(c) }.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (now) BaseColors.Cyan.copy(alpha = .18f) else Color.Transparent).padding(horizontal = 8.dp, vertical = 8.dp)) {
                     Text(Format.duration(c.startMs), color = Color.White.copy(alpha = .5f), fontSize = 12.sp, modifier = Modifier.width(48.dp))
                     Text(c.text.ifBlank { "(пусто)" }, color = Color.White, fontSize = 14.sp, maxLines = 2)
                 }
@@ -166,8 +167,8 @@ private fun StyleTab(style: CaptionStyle, onPreset: (String) -> Unit, onStyle: (
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(CaptionPresets.all, key = { it.id }) { p ->
                 val sel = style.id == p.id
-                Column(Modifier.width(92.dp).clip(RoundedCornerShape(12.dp)).border(BorderStroke(if (sel) 2.dp else 0.dp, if (sel) BaseColors.Cyan else Color.Transparent), RoundedCornerShape(12.dp))
-                    .background(Color(0xFF3A3B40)).clickable { onPreset(p.id) }, horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(Modifier.pressable { onPreset(p.id) }.width(92.dp).clip(RoundedCornerShape(12.dp)).border(BorderStroke(if (sel) 2.dp else 0.dp, if (sel) BaseColors.Cyan else Color.Transparent), RoundedCornerShape(12.dp))
+                    .background(Color(0xFF3A3B40)), horizontalAlignment = Alignment.CenterHorizontally) {
                     StylePreviewCard(p, Modifier.fillMaxWidth().height(56.dp))
                     Text(p.name, color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(vertical = 5.dp))
                 }
@@ -210,7 +211,7 @@ private fun StyleTab(style: CaptionStyle, onPreset: (String) -> Unit, onStyle: (
 
 @Composable
 private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
-    Text(text, Modifier.clip(RoundedCornerShape(16.dp)).background(if (selected) BaseColors.Cyan else BaseColors.DarkSlot).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
+    Text(text, Modifier.pressable(onClick = onClick).clip(RoundedCornerShape(16.dp)).background(animatedSelectColor(selected)).padding(horizontal = 14.dp, vertical = 7.dp),
         color = if (selected) Color.Black else Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
 }
 
@@ -218,7 +219,7 @@ private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
 private fun ColorRow(selected: Int, onPick: (Int) -> Unit) {
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(Palette) { c ->
-            Box(Modifier.size(28.dp).clip(CircleShape).background(Color(c)).border(BorderStroke(if (c == selected) 3.dp else 1.dp, if (c == selected) BaseColors.Cyan else Color.White.copy(alpha = .25f)), CircleShape).clickable { onPick(c) })
+            Box(Modifier.pressable { onPick(c) }.size(36.dp).clip(CircleShape).background(Color(c)).border(BorderStroke(if (c == selected) 3.dp else 1.dp, if (c == selected) BaseColors.Cyan else Color.White.copy(alpha = .25f)), CircleShape))
         }
     }
 }
@@ -269,7 +270,7 @@ private fun TimeStepper(label: String, valueMs: Long, onChange: (Long) -> Unit) 
         Text(label, color = Color.White.copy(alpha = .7f), modifier = Modifier.width(70.dp), fontSize = 14.sp)
         listOf("−0.1" to -100L, "+0.1" to 100L).forEachIndexed { i, (t, d) ->
             if (i == 1) Text("%.1f с".format(valueMs / 1000f), color = Color.White, modifier = Modifier.width(64.dp).padding(horizontal = 6.dp), fontSize = 14.sp)
-            Text(t, Modifier.clip(RoundedCornerShape(8.dp)).background(BaseColors.DarkSlot).clickable { onChange((valueMs + d).coerceAtLeast(0)) }.padding(horizontal = 12.dp, vertical = 7.dp), color = Color.White, fontSize = 13.sp)
+            Text(t, Modifier.pressable { onChange((valueMs + d).coerceAtLeast(0)) }.clip(RoundedCornerShape(8.dp)).background(BaseColors.DarkSlot).padding(horizontal = 12.dp, vertical = 7.dp), color = Color.White, fontSize = 13.sp)
         }
     }
 }

@@ -1,7 +1,6 @@
 package com.base.editor.ui.profile
 
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -41,6 +40,7 @@ import androidx.compose.ui.unit.sp
 import com.base.editor.core.ProjectMeta
 import com.base.editor.data.Format
 import com.base.editor.ui.theme.BaseColors
+import com.base.editor.ui.theme.pressable
 import com.base.editor.ui.theme.soon
 
 private data class Row_(val label: String, val icon: ImageVector)
@@ -53,7 +53,7 @@ fun ProfileScreen(projects: List<ProjectMeta>) {
     ) {
         Row(Modifier.fillMaxWidth().padding(top = 12.dp), horizontalArrangement = Arrangement.End) {
             listOf(Icons.Rounded.NotificationsNone to "Уведомления", Icons.Rounded.Settings to "Настройки").forEach { (i, d) ->
-                Box(Modifier.size(44.dp).clip(CircleShape).clickable { soon(ctx) }, contentAlignment = Alignment.Center) { Icon(i, d, tint = BaseColors.Ink) }
+                Box(Modifier.pressable { soon(ctx) }.size(44.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(i, d, tint = BaseColors.Ink) }
             }
         }
         Row(Modifier.padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -71,7 +71,7 @@ fun ProfileScreen(projects: List<ProjectMeta>) {
         }
         Spacer(Modifier.height(20.dp))
         listOf(Row_("События", Icons.Rounded.EmojiEvents), Row_("Избранное", Icons.Rounded.Bookmark), Row_("История", Icons.Rounded.History), Row_("Справочный центр", Icons.Rounded.HelpOutline)).forEach { r ->
-            Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { soon(ctx) }.padding(vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+            Row(Modifier.pressable { soon(ctx) }.fillMaxWidth().clip(RoundedCornerShape(12.dp)).padding(vertical = 18.dp), verticalAlignment = Alignment.CenterVertically) {
                 Icon(r.icon, null, tint = BaseColors.Ink)
                 Text(r.label, Modifier.weight(1f).padding(start = 16.dp), fontSize = 18.sp, color = BaseColors.Ink)
                 Icon(Icons.Rounded.ChevronRight, null, tint = BaseColors.Muted)

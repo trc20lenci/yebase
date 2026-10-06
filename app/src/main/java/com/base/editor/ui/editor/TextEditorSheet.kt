@@ -5,7 +5,6 @@ import android.view.WindowManager
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -63,6 +62,8 @@ import androidx.compose.ui.window.DialogProperties
 import androidx.compose.ui.window.DialogWindowProvider
 import com.base.editor.text.TextClip
 import com.base.editor.ui.theme.BaseColors
+import com.base.editor.ui.theme.animatedSelectColor
+import com.base.editor.ui.theme.pressable
 
 private val TextPalette = listOf(
     0xFFFFFFFFL, 0xFF000000L, 0xFFFFEB3BL, 0xFFFF6D00L, 0xFFFF1744L, 0xFFFF2DF1L,
@@ -97,7 +98,7 @@ fun TextInputSheet(text: String, onChange: (String) -> Unit, onDone: () -> Unit)
                 value = text, onValueChange = onChange,
                 modifier = Modifier.weight(1f).focusRequester(focus), placeholder = { Text("Введите текст") }, minLines = 1, maxLines = 3,
             )
-            Text("Готово", Modifier.padding(start = 10.dp).clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).clickable(onClick = onDone).padding(horizontal = 18.dp, vertical = 12.dp),
+            Text("Готово", Modifier.pressable(onClick = onDone).padding(start = 10.dp).clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).padding(horizontal = 18.dp, vertical = 12.dp),
                 color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
     }
@@ -152,9 +153,9 @@ fun TextToolbar(
                         }
                         TextSub.COLOR -> {
                             items(TEXT_COLORS, key = { it }) { c ->
-                                Box(Modifier.size(34.dp).clip(CircleShape).background(Color(c))
+                                Box(Modifier.pressable { onChange { it.copy(textColor = c) } }.size(34.dp).clip(CircleShape).background(Color(c))
                                     .then(if (clip.textColor == c) Modifier.border(3.dp, BaseColors.Cyan, CircleShape) else Modifier.border(1.dp, Color.White.copy(alpha = .35f), CircleShape))
-                                    .clickable { onChange { it.copy(textColor = c) } })
+                                    )
                             }
                             item { Chip(clip.hasBackground, { onChange { it.copy(backgroundColor = if (clip.hasBackground) 0L else 0x99000000) } }) { Text("Плашка", fontSize = 13.sp, color = chipText(clip.hasBackground)) } }
                         }
@@ -172,8 +173,8 @@ private fun chipText(on: Boolean) = if (on) Color.Black else Color.White
 @Composable
 private fun Chip(on: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
     Box(
-        Modifier.height(44.dp).clip(RoundedCornerShape(12.dp)).background(if (on) BaseColors.Cyan else BaseColors.DarkSlot)
-            .clickable(onClick = onClick).padding(horizontal = 14.dp),
+        Modifier.pressable(onClick = onClick).height(44.dp).clip(RoundedCornerShape(12.dp)).background(animatedSelectColor(on))
+            .padding(horizontal = 14.dp),
         contentAlignment = Alignment.Center,
     ) { content() }
 }
@@ -181,7 +182,7 @@ private fun Chip(on: Boolean, onClick: () -> Unit, content: @Composable () -> Un
 @Composable
 private fun PanelAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
     Column(
-        Modifier.width(62.dp).height(56.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
+        Modifier.pressable(onClick = onClick).width(62.dp).height(56.dp).clip(RoundedCornerShape(12.dp)).padding(vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Icon(icon, label, tint = Color.White, modifier = Modifier.size(24.dp))
@@ -191,7 +192,7 @@ private fun PanelAction(label: String, icon: androidx.compose.ui.graphics.vector
 
 @Composable
 private fun PagChip(text: String, selected: Boolean, onClick: () -> Unit) {
-    Text(text, Modifier.clip(RoundedCornerShape(16.dp)).background(if (selected) BaseColors.Cyan else BaseColors.DarkSlot).clickable(onClick = onClick).padding(horizontal = 14.dp, vertical = 7.dp),
+    Text(text, Modifier.pressable(onClick = onClick).clip(RoundedCornerShape(16.dp)).background(animatedSelectColor(selected)).padding(horizontal = 14.dp, vertical = 7.dp),
         color = if (selected) Color.Black else Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
 }
 
@@ -202,7 +203,7 @@ private fun ColorChips(selected: Long, onPick: (Long) -> Unit) {
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(TextPalette) { c ->
             val sel = (c and 0xFFFFFF) == (selected and 0xFFFFFF)
-            Box(Modifier.size(30.dp).clip(CircleShape).background(Color(c)).border(BorderStroke(if (sel) 3.dp else 1.dp, if (sel) BaseColors.Cyan else Color.White.copy(alpha = .25f)), CircleShape).clickable { onPick(c) })
+            Box(Modifier.pressable { onPick(c) }.size(36.dp).clip(CircleShape).background(Color(c)).border(BorderStroke(if (sel) 3.dp else 1.dp, if (sel) BaseColors.Cyan else Color.White.copy(alpha = .25f)), CircleShape))
         }
     }
 }

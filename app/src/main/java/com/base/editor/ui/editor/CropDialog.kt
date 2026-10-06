@@ -3,7 +3,6 @@ package com.base.editor.ui.editor
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +39,8 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.base.editor.core.CropRect
 import com.base.editor.ui.theme.BaseColors
+import com.base.editor.ui.theme.animatedSelectColor
+import com.base.editor.ui.theme.pressable
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
@@ -62,12 +63,12 @@ fun CropDialog(frame: ImageBitmap?, initial: CropRect, onDone: (CropRect?) -> Un
         var preset by remember { mutableStateOf(CropPreset.FREE) }
         Column(Modifier.fillMaxSize().background(Color.Black).systemBarsPadding().padding(12.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Отмена", color = Color.White, fontSize = 15.sp, modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClick = onCancel).padding(10.dp))
+                Text("Отмена", color = Color.White, fontSize = 15.sp, modifier = Modifier.pressable(onClick = onCancel).clip(RoundedCornerShape(10.dp)).padding(10.dp))
                 Box(Modifier.weight(1f))
                 Text("Сброс", color = Color.White.copy(alpha = .8f), fontSize = 15.sp,
-                    modifier = Modifier.clip(RoundedCornerShape(10.dp)).clickable { rect = CropRect(); preset = CropPreset.FREE }.padding(10.dp))
+                    modifier = Modifier.pressable { rect = CropRect(); preset = CropPreset.FREE }.clip(RoundedCornerShape(10.dp)).padding(10.dp))
                 Text("Готово", color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).clickable { onDone(rect.takeIf { !it.isFull }) }.padding(horizontal = 16.dp, vertical = 10.dp))
+                    modifier = Modifier.pressable { onDone(rect.takeIf { !it.isFull }) }.clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).padding(horizontal = 16.dp, vertical = 10.dp))
             }
             Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
                 if (frame == null) Text("Загрузка кадра…", color = Color.White.copy(alpha = .6f))
@@ -83,12 +84,12 @@ fun CropDialog(frame: ImageBitmap?, initial: CropRect, onDone: (CropRect?) -> Un
                 CropPreset.entries.forEach { p ->
                     val on = p == preset
                     Box(
-                        Modifier.weight(1f).clip(RoundedCornerShape(10.dp))
-                            .background(if (on) BaseColors.Cyan else Color.White.copy(alpha = .1f))
-                            .clickable {
+                        Modifier.pressable {
                                 preset = p
                                 if (frame != null && p.ratio != null) rect = fitRatio(frame.width.toFloat() / frame.height, p.ratio, rect)
-                            }.padding(vertical = 12.dp),
+                            }.weight(1f).clip(RoundedCornerShape(10.dp))
+                            .background(animatedSelectColor(on, offColor = Color.White.copy(alpha = .1f)))
+                            .padding(vertical = 12.dp),
                         contentAlignment = Alignment.Center,
                     ) { Text(p.label, color = if (on) Color.Black else Color.White, fontSize = 11.sp, maxLines = 1) }
                 }
