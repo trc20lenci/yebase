@@ -1,3 +1,5 @@
+import java.net.URI
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -13,7 +15,7 @@ val downloadSherpa by tasks.registering {
     doLast {
         sherpaAar.parentFile.mkdirs()
         val part = File(sherpaAar.parentFile, sherpaAar.name + ".part")
-        java.net.URI("https://github.com/k2-fsa/sherpa-onnx/releases/download/v$sherpaVersion/sherpa-onnx-$sherpaVersion.aar").toURL().openStream().use { input ->
+        URI("https://github.com/k2-fsa/sherpa-onnx/releases/download/v$sherpaVersion/sherpa-onnx-$sherpaVersion.aar").toURL().openStream().use { input ->
             part.outputStream().use { input.copyTo(it) }
         }
         check(part.length() > 40_000_000L) { "sherpa-onnx AAR скачан не полностью" }
