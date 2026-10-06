@@ -36,7 +36,8 @@ app/src/main/java/com/base/editor/
 │   ├── CaptionManager.kt        — владелец субтитров проекта (карточки, стиль, генерация)
 │   └── asr/                     — AudioPcmExtractor, SpeechActivity, SherpaModelStore (загрузка модели),
 │                                  SherpaWhisper (OfflineRecognizer), WordTimings (токены → слова), AutoCaptionGenerator
-├── text/                        — TextClip (+fontId), TextTrack, TextJson, TextClipRenderer, TextFonts (8 шрифтов)
+├── text/                        — TextClip (+шрифт, контур, тень, стиль, анимация), TextTrack, TextJson, TextClipRenderer,
+│                                  TextFonts (9 вшитых шрифтов с кириллицей), TextStyles (пресеты + TextAnimator)
 ├── pag/                         — PagTemplateStore, PagTitles
 ├── data/
 │   ├── ProjectRepository.kt     — проекты: filesDir/projects/<id>.json (+ обложка .jpg)
@@ -54,7 +55,9 @@ app/src/main/java/com/base/editor/
         ├── CropDialog.kt        — кадрирование: рамка, сетка 3×3, угловые маркеры, пресеты пропорций
         ├── CaptionOverlay.kt, CaptionPanel.kt (+ переключатель языка)
         ├── TextOverlay.kt, PagTitleOverlay.kt
-        └── TextEditorSheet.kt   — TextInputSheet (строка ввода) и TextContextPanel (нижняя панель текста)
+        ├── TextEditorSheet.kt   — TextInputSheet (строка ввода) и TextToolbar (панель текста в слоте инструментов)
+        └── ExportSheet.kt       — лист экспорта: дискретные слайдеры разрешения и FPS, оценка веса
+    └── theme/                   — Theme.kt (цвета, Inter), Motion.kt (токены движения, pressable, staggeredEnter)
 ```
 
 Ресурсы: шрифты Montserrat/Oswald/Rubik/Russo One/Pacifico; `assets/shaders` (44 перехода + превью webp).
@@ -93,6 +96,27 @@ TextTrackTest, SpeechActivityTest.
   с анимацией; содержимое обрезается `clipToBounds()`.
 - **Экспорт** — `VideoExportManager` (Transformer → MP4), поток `Flow<ExportState>`,
   при сбое — повтор в упрощённом режиме (без эффектов, меньшее разрешение).
+
+### Взаимодействие с дорожками и экран редактора
+
+- Выделение одно на редактор: клип/аудио (`selectedId`), текстовый слой (`canvasTextId`) или карточка субтитров
+  (`selectedCaptionId`). Тап по блоку выделяет его, в слоте инструментов под таймлайном (`ToolMode`) появляется своя
+  панель; таймлайн остаётся живым. Блок текста/субтитров двигается только долгим нажатием по уже выделенному блоку;
+  у выделенного блока есть ручки обрезки, «Разделить» режет по курсору (текст, субтитры, аудио).
+- Большие панели (субтитры, переходы, формат) показываются поверх фиксированной области с fade-появлением.
+- `EditorScreen` разбит на `PreviewStage`, `TransportRow`, `TimelineHost`: позиция курсора читается только в них,
+  поэтому перемотка не перекомпонует весь экран. Рамка превью берёт пропорции из `canvasAspect` мгновенно; пока
+  плеер не показал композицию нового формата (`displayAspect`), картинка заполняет рамку (ZOOM).
+- Перемотка: `scrubTo` троттлит seek (33 мс), а `ScrubFrames` показывает кадр под курсором напрямую из файла
+  (MediaMetadataRetriever), пока плеер на паузе догоняет позицию.
+
+### Дизайн и движение
+
+- `Theme.kt`: тёмная гамма и вторичный текст по рекомендациям ui-ux-pro-max, Inter на всё приложение.
+  Акцент — бренд-цвет Cyan; рекомендованный навыком розовый лежит в `BaseColors.AccentPink`.
+- `Motion.kt`: `BaseMotion` (кривая ease-out `0.23, 1, 0.32, 1`, длительности ≤ 220 мс), `Modifier.pressable`
+  (сжатие 0.96 и затемнение при нажатии, ставится первым в цепочке), `staggeredEnter` (каскад первых 10 элементов
+  списка), учёт системного отключения анимаций.
 
 ## 3. Модели данных
 
