@@ -10,7 +10,10 @@ import com.base.editor.captions.CaptionItem
 import com.base.editor.captions.CaptionManager
 import com.base.editor.data.PickedMediaInbox
 import com.base.editor.pag.PagTemplateStore
+import com.base.editor.text.TextAnimation
+import com.base.editor.text.TextAnimator
 import com.base.editor.text.TextClip
+import com.base.editor.text.TextStyles
 import com.base.editor.core.Clip
 import com.base.editor.core.ClipTransform
 import com.base.editor.core.PickedMedia
@@ -63,13 +66,17 @@ interface TimelineActions {
     fun openText(id: String)
     fun moveText(id: String, startMs: Long)
     fun moveCaption(id: String, startMs: Long)
+    fun trimText(id: String, startMs: Long, endMs: Long)
+    fun trimCaption(id: String, startMs: Long, endMs: Long)
 }
 
 /** Клип во время жеста: [baked] — положение, уже «запечённое» в показанной композиции; [current] — новое. */
 data class LiveClip(val id: Long, val baked: ClipTransform, val current: ClipTransform)
 
-/** Редактируемый текст: [isNew] — ещё не добавлен на дорожку. */
-data class TextDraft(val clip: TextClip, val isNew: Boolean)
+/** Раздел нижней панели текста. */
+enum class TextSub { FONTS, STYLES, ANIMATION, COLOR }
+
+private const val SCRUB_OVERLAY_HOLD_MS = 350L
 
 @OptIn(FlowPreview::class)
 @UnstableApi
@@ -112,7 +119,6 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     val exportState = MutableStateFlow<ExportState?>(null)
     val captionPanelOpen = MutableStateFlow(false)
     /** Текст, который сейчас редактируется (новый или существующий). */
-    val textDraft = MutableStateFlow<TextDraft?>(null)
     /** true — открыта строка ввода текста (клавиатура); false — показана нижняя панель инструментов текста. */
     val textInputOpen = MutableStateFlow(false)
     private val pagStore = PagTemplateStore(app)
@@ -130,6 +136,17 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
      * не «схлопывается» в промежутке пересборки; сам переход в интерфейсе плавный (animateFloatAsState).
      */
     val displayAspect = MutableStateFlow(9f / 16f)
+    /** Пропорции выбранного формата — для рамки предпросмотра: меняются мгновенно, одним кадром. */
+    val canvasAspect = MutableStateFlow(9f / 16f)
+    val exportSheetOpen = MutableStateFlow(false)
+    fun openExportSheet() { controller.pause(); exportSheetOpen.value = true }
+    fun closeExportSheet() { exportSheetOpen.value = false }
+
+    // ───────── живой предпросмотр при скраббинге ─────────
+    private val scrubFrames = com.base.editor.media.ScrubFrames(app, viewModelScope)
+    val scrubFrame = scrubFrames.frame
+    val scrubOverlayOn = MutableStateFlow(false)
+    private var scrubHideJob: kotlinx.coroutines.Job? = null
 
     var onRequestAddMedia: (() -> Unit)? = null
     /** Открыть системный выбор аудиофайла (подставляет экран). */
@@ -183,7 +200,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     fun closeFormat() { formatPanelOpen.value = false }
 
     private fun shortSide() = when (resolution.value) { "480p" -> 480; "1080p" -> 1080; else -> 720 }
-    private fun applyCanvas() { aspect = format.value.aspect ?: originalAspect; controller.setCanvas(CompositionFactory.canvasFor(aspect, shortSide())) }
+    private fun applyCanvas() { aspect = format.value.aspect ?: originalAspect; canvasAspect.value = aspect; controller.setCanvas(CompositionFactory.canvasFor(aspect, shortSide())) }
     fun setResolution(r: String) { resolution.value = r; applyCanvas() }
 
     private fun persist() {
@@ -203,10 +220,32 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     // ───────── TimelineActions ─────────
     override fun scrubStart() = controller.pause()
     override fun scrubTo(ms: Long) {
-        if (isLoading.value || controller.state.value.clips.isEmpty()) return   // нет композиции — нечего перематывать
-        controller.scrubTo(snapToKeyframe(ms))
+        val t = snapToKeyframe(ms)
+        controller.scrubTo(t)
+        scrubPreview(t, exact = false)
     }
-    override fun scrubEnd() = controller.scrubEnd()
+
+    override fun scrubEnd() {
+        controller.scrubEnd()
+        scrubPreview(playheadMs.value, exact = true)           // палец остановился — точный кадр
+        scrubHideJob?.cancel()
+        scrubHideJob = viewModelScope.launch {
+            // оверлей держится, пока плеер догоняет позицию (BUFFERING), но не дольше нескольких секунд
+            delay(SCRUB_OVERLAY_HOLD_MS)
+            val deadline = System.currentTimeMillis() + 3000
+            while (controller.isBuffering.value && System.currentTimeMillis() < deadline) delay(50)
+            delay(150)
+            scrubOverlayOn.value = false; scrubFrames.clear()
+        }
+    }
+
+    /** Кадр под курсором напрямую из файла: плеер на паузе догоняет позицию с задержкой, а этот кадр виден сразу. */
+    private fun scrubPreview(t: Long, exact: Boolean) {
+        val clip = clips.value.firstOrNull { it.row == 0 && it.type != com.base.editor.core.MediaType.AUDIO && t >= it.startMs && t < it.endMs } ?: return
+        scrubHideJob?.cancel(); scrubOverlayOn.value = true
+        val local = t - clip.startMs
+        scrubFrames.request(clip, local, exact, controller.state.value.transformAt(clip.id, local), controller.cropOf(clip.id))
+    }
 
     /** Курсор «считывает» ромбики выбранного клипа: рядом с ключом (±8 px шкалы) скраб прилипает к нему. */
     private fun snapToKeyframe(ms: Long): Long {
@@ -219,7 +258,10 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         val at = hit.timeMs + clip.startMs
         return if (kotlin.math.abs(at - ms) <= threshold) at else ms
     }
-    override fun select(id: Long?) { selectedId.value = id; if (id != null) canvasTextId.value = null }
+    /** Выделение одно на весь редактор: клип/аудио, текстовый слой или карточка субтитров. null — снять всё. */
+    override fun select(id: Long?) {
+        selectedId.value = id; canvasTextId.value = null; selectedCaptionId.value = null; textSub.value = null
+    }
     override fun editBegin() = controller.beginEdit()
     override fun moveClip(id: Long, startMs: Long) = controller.move(id, startMs, (8f / pxPerSec.value * 1000).toLong())
     override fun trimStart(id: Long, ms: Long) = controller.trimStart(id, ms)
@@ -289,12 +331,8 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     }
 
     // ───────── субтитры ─────────
-    fun openCaptions() { controller.pause(); formatPanelOpen.value = false; selectedId.value = null; transitionFor.value = null; captionPanelOpen.value = true }
+    fun openCaptions() { controller.pause(); formatPanelOpen.value = false; selectedId.value = null; canvasTextId.value = null; selectedCaptionId.value = null; transitionFor.value = null; captionPanelOpen.value = true }
     fun closeCaptions() { captionPanelOpen.value = false; editingCaptionId.value = null }
-    override fun openCaption(id: String) {
-        openCaptions()
-        captions.items.value.firstOrNull { it.id == id }?.let { controller.seekTo(it.startMs); editingCaptionId.value = id }
-    }
     fun openCaptionItem(c: CaptionItem) { controller.pause(); controller.seekTo(c.startMs); editingCaptionId.value = c.id }
     fun addCaptionHere() { editingCaptionId.value = captions.addAt(playheadMs.value) }
     val captionLanguage = MutableStateFlow(com.base.editor.captions.CaptionLanguage.AUTO)
@@ -362,7 +400,6 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
 
     /** Что выделено на холсте: слой текста (черновик имеет приоритет) или клип под курсором. */
     fun canvasTarget(): CanvasTarget? {
-        textDraft.value?.let { return CanvasTarget.Text(it.clip, isDraft = true) }
         canvasTextId.value?.let { id -> controller.findText(id)?.let { return CanvasTarget.Text(it, isDraft = false) } }
         val clip = selectedClipAtPlayhead() ?: return null
         val live = liveClipTransform.value?.takeIf { it.id == clip.id }?.current
@@ -390,9 +427,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         }
     }
 
-    override fun onTextTransform(clip: TextClip, isDraft: Boolean) {
-        if (isDraft) updateTextDraft { clip } else controller.updateText(clip)
-    }
+    override fun onTextTransform(clip: TextClip, isDraft: Boolean) { controller.updateText(clip) }
 
     /** Конец жеста: фиксируем и пересобираем композицию; «живая» трансформация держится, пока не покажется новый кадр. */
     override fun onGestureEnd() {
@@ -408,77 +443,108 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         } else controller.pause()
     }
 
-    override fun onTapText(id: String) {
-        selectedId.value = null
-        if (textDraft.value == null) openText(id)        // тап по тексту — сразу контекстная нижняя панель
-    }
+    override fun onTapText(id: String) { openText(id) }
 
     override fun onTapVideo() {
-        canvasTextId.value = null
-        if (textDraft.value != null) return
+        // тап по видео: выделение клипа под курсором; выделенный текст/субтитры — снимаются
+        canvasTextId.value = null; selectedCaptionId.value = null; textSub.value = null
         val t = playheadMs.value
         val clip = clips.value.firstOrNull { it.row == 0 && t >= it.startMs && t < it.endMs }
         selectedId.value = if (clip != null && selectedId.value != clip.id) clip.id else null
     }
 
-    // ───────── текст ─────────
-    /** Кнопка «Текст»: открывает редактор нового слоя на позиции курсора. */
+    // ───────── текст: правки сразу попадают в слой, отдельных «черновиков» и модальных окон нет ─────────
+    val textSub = MutableStateFlow<TextSub?>(null)
+    val captionInputOpen = MutableStateFlow(false)
+    val selectedCaptionId = MutableStateFlow<String?>(null)
+
+    /** Кнопка «Текст»: создаёт слой на позиции курсора, выделяет его и открывает строку ввода. */
     fun openNewText() {
-        controller.pause(); selectedId.value = null; transitionFor.value = null; captionPanelOpen.value = false
-        textDraft.value = TextDraft(TextClip(text = "", startMs = playheadMs.value), isNew = true)
+        controller.pause()
+        val clip = TextClip(text = "Текст", startMs = playheadMs.value).let { TextStyles.byId("plain")!!.apply(it) }
+        controller.addText(clip)
+        select(null); canvasTextId.value = clip.id
         textInputOpen.value = true
     }
 
     override fun moveText(id: String, startMs: Long) = controller.moveText(id, startMs)
     override fun moveCaption(id: String, startMs: Long) = captions.moveTo(id, startMs)
+    override fun trimText(id: String, startMs: Long, endMs: Long) {
+        controller.findText(id)?.let {
+            val s0 = startMs.coerceAtLeast(0L); val e0 = maxOf(endMs, s0 + TextClip.MIN_DURATION_MS)
+            controller.updateText(it.copy(startMs = s0, durationMs = (e0 - s0).coerceAtMost(TextClip.MAX_DURATION_MS)))
+        }
+    }
+    override fun trimCaption(id: String, startMs: Long, endMs: Long) = captions.trim(id, startMs, endMs)
 
+    /** Тап по текстовому блоку (таймлайн или холст): выделение → в слоте инструментов появляется панель текста. Плеер не трогаем. */
     override fun openText(id: String) {
-        val clip = controller.findText(id) ?: return
-        controller.pause(); controller.seekTo(clip.startMs)
+        if (controller.findText(id) == null) return
+        selectedId.value = null; selectedCaptionId.value = null; captionPanelOpen.value = false; textSub.value = null
         canvasTextId.value = id
-        textDraft.value = TextDraft(clip, isNew = false)
     }
 
-    fun updateTextDraft(f: (TextClip) -> TextClip) { textDraft.update { d -> d?.copy(clip = f(d.clip)) } }
-
-    /** «Готово»: пустой новый текст не создаётся. */
-    fun commitText() {
-        val d = textDraft.value ?: return
-        textDraft.value = null; textInputOpen.value = false
-        if (d.clip.text.isBlank()) { if (!d.isNew) controller.removeText(d.clip.id); return }
-        if (d.isNew) controller.addText(d.clip) else controller.updateText(d.clip)
+    /** Тап по блоку субтитров: выделение карточки; панель инструментов субтитров появляется в слоте. */
+    override fun openCaption(id: String) {
+        if (captions.items.value.none { it.id == id }) return
+        selectedId.value = null; canvasTextId.value = null; textSub.value = null
+        selectedCaptionId.value = id
     }
+
+    val selectedTextClip get() = canvasTextId.value?.let { controller.findText(it) }
+
+    fun editText(f: (TextClip) -> TextClip) {
+        val c = selectedTextClip ?: return
+        controller.updateText(f(c))
+    }
+
+    fun applyTextStyle(p: TextStyles.Preset) = editText { p.apply(it) }
+
+    /** Выбор анимации: показываем её — курсор на начало слоя и короткое воспроизведение. */
+    fun applyTextAnimation(anim: TextAnimation) {
+        val c = selectedTextClip ?: return
+        val updated = c.copy(animId = anim.id)
+        controller.updateText(updated)
+        if (anim != TextAnimation.NONE) controller.playRange(updated.startMs, minOf(updated.endMs, updated.startMs + TextAnimator.durationMs(updated) + 500))
+    }
+
+    fun setTextSub(v: TextSub?) { textSub.value = v }
+    fun openTextInput() { textInputOpen.value = true }
+    fun closeTextInput() { textInputOpen.value = false }
+    fun setTextValue(t: String) = editText { it.copy(text = t) }
+
+    /** «Разделить»: текстовый блок режется по курсору на две независимые части. */
+    fun splitText() {
+        val c = selectedTextClip ?: return
+        val at = playheadMs.value
+        if (at < c.startMs + TextClip.MIN_DURATION_MS || at > c.endMs - TextClip.MIN_DURATION_MS) {
+            events.value = "Поставьте курсор внутрь блока"; return
+        }
+        controller.updateText(c.copy(durationMs = at - c.startMs))
+        val right = c.copy(id = java.util.UUID.randomUUID().toString(), startMs = at, durationMs = c.endMs - at)
+        controller.addText(right)
+        canvasTextId.value = right.id
+    }
+    fun deleteText() { canvasTextId.value?.let(controller::removeText); canvasTextId.value = null; textSub.value = null }
+
+    fun splitCaption() {
+        val id = selectedCaptionId.value ?: return
+        if (!captions.split(id, playheadMs.value)) events.value = "Поставьте курсор внутрь карточки"
+    }
+    fun deleteCaption() { selectedCaptionId.value?.let(captions::delete); selectedCaptionId.value = null }
+    val selectedCaption get() = selectedCaptionId.value?.let { id -> captions.items.value.firstOrNull { it.id == id } }
+    fun setCaptionValue(t: String) { selectedCaptionId.value?.let { captions.updateText(it, t) } }
+    fun openCaptionInput() { captionInputOpen.value = true }
+    fun closeCaptionInput() { captionInputOpen.value = false }
 
     fun importPag(uri: android.net.Uri) {
         viewModelScope.launch {
             val t = pagStore.import(uri)
             if (t == null) { events.value = "Не удалось открыть файл шаблона"; return@launch }
             pagTemplates.value = pagStore.list()
-            updateTextDraft { it.copy(pagTemplate = t.ref) }
+            editText { it.copy(pagTemplate = t.ref) }
         }
     }
-
-    fun cancelText() { textDraft.value = null; textInputOpen.value = false }
-    fun openTextInput() { textInputOpen.value = true }
-    /** Ввод закончен: пустой новый текст не создаётся, иначе показывается панель инструментов. */
-    fun closeTextInput() {
-        textInputOpen.value = false
-        val d = textDraft.value ?: return
-        if (d.clip.text.isBlank() && d.isNew) textDraft.value = null
-    }
-
-    /** «Разделить» для текста: делит блок на два по курсору. */
-    fun splitText() {
-        val d = textDraft.value ?: return
-        val c = d.clip; val at = playheadMs.value
-        if (d.isNew || at < c.startMs + TextClip.MIN_DURATION_MS || at > c.endMs - TextClip.MIN_DURATION_MS) {
-            events.value = "Поставьте курсор внутри текстового блока"; return
-        }
-        controller.updateText(c.copy(durationMs = at - c.startMs))
-        controller.addText(c.copy(id = java.util.UUID.randomUUID().toString(), startMs = at, durationMs = c.endMs - at))
-        textDraft.value = null; canvasTextId.value = null
-    }
-    fun deleteText() { textDraft.value?.let { if (!it.isNew) controller.removeText(it.clip.id) }; textDraft.value = null; canvasTextId.value = null }
 
     // ───────── экспорт ─────────
     private fun exportQuality() = when (resolution.value) { "480p" -> ExportQuality.P480; "1080p" -> ExportQuality.P1080; "2K/4K" -> ExportQuality.P1440; else -> ExportQuality.P720 }
@@ -504,6 +570,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     fun dismissExport() { exportState.value = null }
 
     override fun onCleared() {
+        scrubFrames.release()
         captions.cancelGeneration()
         persist()
         controller.release()

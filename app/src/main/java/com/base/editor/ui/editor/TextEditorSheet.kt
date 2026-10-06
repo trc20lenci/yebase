@@ -15,6 +15,11 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material.icons.rounded.ChevronLeft
+import androidx.compose.material.icons.rounded.AutoAwesome
+import androidx.compose.material.icons.rounded.Animation
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.DeleteOutline
@@ -96,74 +101,89 @@ fun TextInputSheet(text: String, onChange: (String) -> Unit, onDone: () -> Unit)
     }
 }
 
-private enum class TextSub { FONTS, STYLE }
-
 /**
- * Контекстная нижняя панель текстового слоя (как у медиафайлов): «Текст», «Разделить», «Шрифты», «Стиль/Цвет», «Удалить».
- * Размер, положение и поворот меняются жестами на холсте, длительность — краями блока на таймлайне, поэтому числовых полей нет.
+ * Панель инструментов текстового слоя в слоте под таймлайном (как у медиа-клипа). Таймлайн остаётся живым.
+ * Корневой ряд: «Назад / Текст / Разделить / Шрифты / Стили / Анимация / Цвет / Удалить»; разделы заменяют ряд
+ * горизонтальной каруселью с кнопкой возврата. Размер, поворот и положение — жестами на холсте.
  */
 @Composable
-fun TextContextPanel(
-    clip: TextClip, isNew: Boolean,
-    onChange: ((TextClip) -> TextClip) -> Unit,
-    templates: List<com.base.editor.pag.PagTemplateStore.Template>, onImportPag: (android.net.Uri) -> Unit,
-    onEditText: () -> Unit, onSplit: () -> Unit, onDelete: () -> Unit, onDone: () -> Unit,
+fun TextToolbar(
+    clip: TextClip, sub: TextSub?, templates: List<com.base.editor.pag.PagTemplateStore.Template>,
+    onBack: () -> Unit, onSub: (TextSub?) -> Unit, onEditText: () -> Unit, onSplit: () -> Unit, onDelete: () -> Unit,
+    onChange: ((TextClip) -> TextClip) -> Unit, onStyle: (com.base.editor.text.TextStyles.Preset) -> Unit,
+    onAnimation: (com.base.editor.text.TextAnimation) -> Unit, onImportPag: (android.net.Uri) -> Unit,
 ) {
-    var sub by remember { mutableStateOf<TextSub?>(null) }
-    Column(Modifier.fillMaxWidth().background(BaseColors.DarkPanel).padding(horizontal = 12.dp, vertical = 8.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(when (sub) { TextSub.FONTS -> "Шрифты"; TextSub.STYLE -> "Стиль и цвет"; null -> "Текст" }, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
-            Spacer(Modifier.weight(1f))
-            if (sub != null) Text("Назад", Modifier.clip(RoundedCornerShape(10.dp)).clickable { sub = null }.padding(horizontal = 12.dp, vertical = 8.dp), color = Color.White.copy(alpha = .8f), fontSize = 14.sp)
-            Text("Готово", Modifier.clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).clickable(onClick = onDone).padding(horizontal = 18.dp, vertical = 8.dp),
-                color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
-        }
-        when (sub) {
-            null -> Row(Modifier.fillMaxWidth().padding(top = 8.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+    androidx.compose.animation.Crossfade(sub, animationSpec = androidx.compose.animation.core.tween(160, easing = androidx.compose.animation.core.CubicBezierEasing(0.23f, 1f, 0.32f, 1f)), label = "textSub") { cur ->
+        if (cur == null) {
+            Row(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+                PanelAction("Назад", Icons.Rounded.ChevronLeft, onClick = onBack)
                 PanelAction("Текст", Icons.Rounded.Edit, onClick = onEditText)
-                PanelAction("Разделить", Icons.Rounded.VerticalSplit, enabled = !isNew, onClick = onSplit)
-                PanelAction("Шрифты", Icons.Rounded.TextFields) { sub = TextSub.FONTS }
-                PanelAction("Стиль/Цвет", Icons.Rounded.Palette) { sub = TextSub.STYLE }
+                PanelAction("Разделить", Icons.Rounded.VerticalSplit, onClick = onSplit)
+                PanelAction("Шрифты", Icons.Rounded.TextFields) { onSub(TextSub.FONTS) }
+                PanelAction("Стили", Icons.Rounded.AutoAwesome) { onSub(TextSub.STYLES) }
+                PanelAction("Анимация", Icons.Rounded.Animation) { onSub(TextSub.ANIMATION) }
+                PanelAction("Цвет", Icons.Rounded.Palette) { onSub(TextSub.COLOR) }
                 PanelAction("Удалить", Icons.Rounded.DeleteOutline, onClick = onDelete)
             }
-            TextSub.FONTS -> LazyRow(Modifier.padding(top = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                items(com.base.editor.text.TextFonts.all, key = { it.id }) { f ->
-                    val on = clip.fontId == f.id
-                    Box(
-                        Modifier.clip(RoundedCornerShape(12.dp)).background(if (on) BaseColors.Cyan else BaseColors.DarkSlot)
-                            .clickable { onChange { it.copy(fontId = f.id) } }.padding(horizontal = 16.dp, vertical = 12.dp),
-                    ) { Text("Аа Яя", color = if (on) Color.Black else Color.White, fontSize = 20.sp, fontFamily = f.family) }
-                }
-            }
-            TextSub.STYLE -> Column(Modifier.heightIn(max = 220.dp).verticalScroll(rememberScrollState())) {
-                Label("Цвет текста")
-                ColorChips(clip.textColor) { c -> onChange { it.copy(textColor = c) } }
-                Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("Фон под текстом", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
-                    Switch(clip.hasBackground, { on -> onChange { it.copy(backgroundColor = if (on) 0xCC000000 else 0L) } },
-                        colors = SwitchDefaults.colors(checkedTrackColor = BaseColors.Cyan, checkedThumbColor = Color.Black))
-                }
-                if (clip.hasBackground) ColorChips(clip.backgroundColor or 0xFF000000) { c -> onChange { it.copy(backgroundColor = 0xCC000000 or (c and 0xFFFFFF)) } }
-                Label("Анимация титра")
-                val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) onImportPag(uri) }
-                LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    item { PagChip("Без анимации", clip.pagTemplate == null) { onChange { it.copy(pagTemplate = null) } } }
-                    items(templates, key = { it.ref }) { t -> PagChip(t.title, clip.pagTemplate == t.ref) { onChange { it.copy(pagTemplate = t.ref) } } }
-                    item { PagChip("+ Свой .pag", false) { picker.launch(arrayOf("*/*")) } }
+        } else {
+            Row(Modifier.fillMaxSize().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                PanelAction("Назад", Icons.Rounded.ChevronLeft) { onSub(null) }
+                LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    when (cur) {
+                        TextSub.FONTS -> items(com.base.editor.text.TextFonts.all, key = { it.id }) { f ->
+                            Chip(clip.fontId == f.id, { onChange { it.copy(fontId = f.id) } }) { Text("Аа Яя", fontSize = 18.sp, fontFamily = f.family, color = chipText(clip.fontId == f.id)) }
+                        }
+                        TextSub.STYLES -> items(com.base.editor.text.TextStyles.all, key = { it.id }) { p ->
+                            val on = clip.styleId == p.id
+                            Chip(on, { onStyle(p) }) { Text(p.label, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = chipText(on)) }
+                        }
+                        TextSub.ANIMATION -> {
+                            items(com.base.editor.text.TextAnimation.entries.toList(), key = { it.id }) { a ->
+                                val on = clip.animId == a.id
+                                Chip(on, { onAnimation(a) }) { Text(a.label, fontSize = 13.sp, color = chipText(on)) }
+                            }
+                            items(templates, key = { it.ref }) { t -> Chip(clip.pagTemplate == t.ref, { onChange { it.copy(pagTemplate = if (clip.pagTemplate == t.ref) null else t.ref) } }) { Text(t.title, fontSize = 13.sp, color = chipText(clip.pagTemplate == t.ref)) } }
+                            item {
+                                val picker = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocument()) { uri -> if (uri != null) onImportPag(uri) }
+                                Chip(false, { picker.launch(arrayOf("*/*")) }) { Text("+ .pag", fontSize = 13.sp, color = Color.White) }
+                            }
+                        }
+                        TextSub.COLOR -> {
+                            items(TEXT_COLORS, key = { it }) { c ->
+                                Box(Modifier.size(34.dp).clip(CircleShape).background(Color(c))
+                                    .then(if (clip.textColor == c) Modifier.border(3.dp, BaseColors.Cyan, CircleShape) else Modifier.border(1.dp, Color.White.copy(alpha = .35f), CircleShape))
+                                    .clickable { onChange { it.copy(textColor = c) } })
+                            }
+                            item { Chip(clip.hasBackground, { onChange { it.copy(backgroundColor = if (clip.hasBackground) 0L else 0x99000000) } }) { Text("Плашка", fontSize = 13.sp, color = chipText(clip.hasBackground)) } }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
+private val TEXT_COLORS = listOf(0xFFFFFFFF, 0xFF000000, 0xFFFFE600, 0xFFFF3B30, 0xFFFF9500, 0xFF34C759, 0xFF00E5FF, 0xFF0A84FF, 0xFFFF2BD6, 0xFFB388FF)
+
+private fun chipText(on: Boolean) = if (on) Color.Black else Color.White
+
 @Composable
-private fun PanelAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, enabled: Boolean = true, onClick: () -> Unit) {
+private fun Chip(on: Boolean, onClick: () -> Unit, content: @Composable () -> Unit) {
+    Box(
+        Modifier.height(44.dp).clip(RoundedCornerShape(12.dp)).background(if (on) BaseColors.Cyan else BaseColors.DarkSlot)
+            .clickable(onClick = onClick).padding(horizontal = 14.dp),
+        contentAlignment = Alignment.Center,
+    ) { content() }
+}
+
+@Composable
+private fun PanelAction(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
     Column(
-        Modifier.clip(RoundedCornerShape(12.dp)).clickable(enabled = enabled, onClick = onClick).padding(horizontal = 8.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
+        Modifier.width(62.dp).height(56.dp).clip(RoundedCornerShape(12.dp)).clickable(onClick = onClick).padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
-        Icon(icon, label, tint = Color.White.copy(alpha = if (enabled) 1f else .35f), modifier = Modifier.size(26.dp))
-        Text(label, color = Color.White.copy(alpha = if (enabled) .85f else .35f), fontSize = 11.sp, maxLines = 1)
+        Icon(icon, label, tint = Color.White, modifier = Modifier.size(24.dp))
+        Text(label, color = Color.White.copy(alpha = .85f), fontSize = 10.sp, maxLines = 1)
     }
 }
 

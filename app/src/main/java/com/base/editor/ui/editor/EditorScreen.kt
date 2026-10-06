@@ -111,24 +111,20 @@ import androidx.compose.material.icons.rounded.ClosedCaption
 import com.base.editor.data.Format
 import com.base.editor.ui.theme.BaseColors
 import com.base.editor.ui.theme.soon
+import kotlin.math.abs
+import androidx.compose.material.icons.rounded.Edit
+import androidx.compose.material.icons.rounded.Palette
 import kotlin.math.roundToInt
 
 @UnstableApi
 @Composable
 fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewModel = viewModel()) {
     val ctx = LocalContext.current
-    val density = LocalDensity.current
+    // Здесь — только редко меняющееся состояние. Позиция курсора читается внутри PreviewStage / TransportRow / TimelineHost,
+    // поэтому перемотка не перекомпонует весь экран (верхняя панель, панели инструментов и т.д.).
     val clips by vm.clips.collectAsStateWithLifecycle()
     val formatPanel by vm.formatPanelOpen.collectAsStateWithLifecycle()
     val selected by vm.selectedId.collectAsStateWithLifecycle()
-    val playhead by vm.playheadMs.collectAsStateWithLifecycle()
-    val total by vm.totalMs.collectAsStateWithLifecycle()
-    val playing by vm.isPlaying.collectAsStateWithLifecycle()
-    val canUndo by vm.canUndo.collectAsStateWithLifecycle()
-    val canRedo by vm.canRedo.collectAsStateWithLifecycle()
-    val zoom by vm.pxPerSec.collectAsStateWithLifecycle()
-    val resolution by vm.resolution.collectAsStateWithLifecycle()
-    val muted by vm.muted.collectAsStateWithLifecycle()
     val event by vm.events.collectAsStateWithLifecycle()
     val transitions by vm.transitions.collectAsStateWithLifecycle()
     val transitionFor by vm.transitionFor.collectAsStateWithLifecycle()
@@ -139,9 +135,14 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     val captionPanel by vm.captionPanelOpen.collectAsStateWithLifecycle()
     val editingCaption by vm.editingCaptionId.collectAsStateWithLifecycle()
     val texts by vm.texts.collectAsStateWithLifecycle()
-    val draft by vm.textDraft.collectAsStateWithLifecycle()
-    val liveClip by vm.liveClipTransform.collectAsStateWithLifecycle()
     val keyframes by vm.keyframes.collectAsStateWithLifecycle()
+    val selText by vm.canvasTextId.collectAsStateWithLifecycle()
+    val selCaption by vm.selectedCaptionId.collectAsStateWithLifecycle()
+    val textSub by vm.textSub.collectAsStateWithLifecycle()
+    val textInput by vm.textInputOpen.collectAsStateWithLifecycle()
+    val captionInput by vm.captionInputOpen.collectAsStateWithLifecycle()
+    val exportSheet by vm.exportSheetOpen.collectAsStateWithLifecycle()
+    val pagTemplates by vm.pagTemplates.collectAsStateWithLifecycle()
 
     SideEffect { vm.onRequestAddMedia = onAddMedia }
     // выбор музыки с устройства (MIME audio/*) — результат уходит во ViewModel
@@ -158,59 +159,170 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     BackHandler {
         when {
             fullscreen -> fullscreen = false
-            draft != null -> vm.cancelText()
+            exportSheet -> vm.closeExportSheet()
+            textSub != null -> vm.setTextSub(null)
             formatPanel -> vm.closeFormat()
             captionPanel -> vm.closeCaptions()
             transitionFor != null -> vm.closeTransitions()
-            selected != null -> vm.select(null)
+            selText != null || selCaption != null || selected != null -> vm.select(null)
             else -> close()
         }
     }
-    val pagTemplates by vm.pagTemplates.collectAsStateWithLifecycle()
-    val textInput by vm.textInputOpen.collectAsStateWithLifecycle()
-    draft?.let { d -> if (textInput) TextInputSheet(d.clip.text, onChange = { t -> vm.updateTextDraft { it.copy(text = t) } }, onDone = vm::closeTextInput) }
+
+    // строка ввода (клавиатура) — маленькое окно у нижнего края без затемнения; остальное редактирование — в панели инструментов
+    if (textInput) texts.firstOrNull { it.id == selText }?.let { TextInputSheet(it.text, onChange = vm::setTextValue, onDone = vm::closeTextInput) }
+    if (captionInput) captionItems.firstOrNull { it.id == selCaption }?.let { TextInputSheet(it.text, onChange = vm::setCaptionValue, onDone = vm::closeCaptionInput) }
+    if (exportSheet) ExportSheet(
+        durationMs = vm.totalMs.value, initialResolution = vm.resolution.value, initialFps = vm.exportFps.value,
+        onDismiss = vm::closeExportSheet,
+        onStart = { res, fps -> vm.setResolution(res); vm.setExportFps(fps); vm.closeExportSheet(); vm.startExport() },
+    )
+    val cropId by vm.cropClipId.collectAsStateWithLifecycle()
+    if (cropId != null) {
+        val frame by vm.cropFrame.collectAsStateWithLifecycle()
+        val init by vm.cropInitial.collectAsStateWithLifecycle()
+        CropDialog(frame, init, onDone = vm::applyCrop, onCancel = vm::cancelCrop)
+    }
 
     Column(Modifier.fillMaxSize().background(BaseColors.DarkBg).systemBarsPadding()) {
-        // верхняя панель
+        // верхняя панель: только выход, логотип и «Экспорт» — параметры рендера в отдельном листе
         if (!fullscreen) Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             RoundIcon(Icons.Rounded.Close, "Выйти", ::close)
             Spacer(Modifier.width(8.dp))
             Image(painterResource(R.drawable.logo_base_white), "BASE", Modifier.height(20.dp))
             Spacer(Modifier.weight(1f))
-            var menu by remember { mutableStateOf(false) }
-            Box {
-                Row(Modifier.clip(RoundedCornerShape(12.dp)).background(BaseColors.DarkPanel).clickable { menu = true }.padding(start = 14.dp, end = 8.dp, top = 9.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text(resolution, color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Color.White)
-                }
-                DropdownMenu(menu, { menu = false }) {
-                    listOf("480p", "720p", "1080p", "2K/4K").forEach { r -> DropdownMenuItem(text = { Text(r) }, onClick = { vm.setResolution(r); menu = false }) }
-                }
-            }
-            Spacer(Modifier.width(6.dp))
-            var fpsMenu by remember { mutableStateOf(false) }
-            val fps by vm.exportFps.collectAsStateWithLifecycle()
-            Box {
-                Row(Modifier.clip(RoundedCornerShape(12.dp)).background(BaseColors.DarkPanel).clickable { fpsMenu = true }.padding(start = 12.dp, end = 6.dp, top = 9.dp, bottom = 9.dp), verticalAlignment = Alignment.CenterVertically) {
-                    Text("$fps fps", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-                    Icon(Icons.Rounded.KeyboardArrowDown, null, tint = Color.White)
-                }
-                DropdownMenu(fpsMenu, { fpsMenu = false }) {
-                    listOf(24, 30, 60).forEach { f -> DropdownMenuItem(text = { Text("$f fps") }, onClick = { vm.setExportFps(f); fpsMenu = false }) }
-                }
-            }
-            Spacer(Modifier.width(10.dp))
-            Text("Экспорт", Modifier.clip(RoundedCornerShape(12.dp)).background(BaseColors.Cyan).clickable { vm.startExport() }.padding(horizontal = 18.dp, vertical = 10.dp),
-                color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+            Text("Экспорт", Modifier.clip(RoundedCornerShape(12.dp)).background(BaseColors.Cyan).clickable(onClick = vm::openExportSheet).padding(horizontal = 18.dp, vertical = 10.dp),
+                color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         }
 
-        // плеер: занимает всё, что осталось над фиксированной нижней областью, поэтому его размер не меняется
+        // плеер занимает всё, что осталось над фиксированной нижней областью, поэтому его размер не меняется
         // ни при открытии панелей, ни при смене инструментов
-        Box(Modifier.weight(1f).fillMaxWidth().background(Color.Black).clipToBounds(), contentAlignment = Alignment.Center) {
-          // рамка выбранного формата: всё, что выходит за её границы, аппаратно отсекается
-          val dispAspectTarget by vm.displayAspect.collectAsStateWithLifecycle()
-          val dispAspect by androidx.compose.animation.core.animateFloatAsState(dispAspectTarget, androidx.compose.animation.core.tween(260), label = "aspect")
-          Box(Modifier.aspectRatio(dispAspect.coerceIn(0.2f, 5f)).clipToBounds()) {
+        PreviewStage(vm, texts, captionItems, captionStyle, selected, fullscreen, { fullscreen = !fullscreen }, Modifier.weight(1f))
+
+        if (!fullscreen) {
+            TransportRow(vm, hasMainSelected = clips.any { it.id == selected && it.row == 0 })
+
+            // Нижняя область ФИКСИРОВАННОЙ высоты: таймлайн + панель инструментов. Таймлайн живой в любом режиме
+            // редактирования (клип, аудио, текст, субтитры): мотать проект и двигать курсор можно всегда.
+            val panelOpen = captionPanel || transitionFor != null || formatPanel
+            Box(Modifier.fillMaxWidth().height((TL_HEIGHT_DP + TOOLBAR_HEIGHT_DP).dp).background(BaseColors.DarkBg)) {
+                Column(Modifier.fillMaxSize()) {
+                    TimelineHost(vm, clips, transitions, captionItems, texts, keyframes, selected, selText, selCaption)
+                    val mode = when {
+                        selText != null -> ToolMode.TEXT
+                        selCaption != null -> ToolMode.CAPTION
+                        selected != null && clips.firstOrNull { it.id == selected }?.type == com.base.editor.core.MediaType.AUDIO -> ToolMode.AUDIO
+                        selected != null -> ToolMode.MEDIA
+                        else -> ToolMode.MAIN
+                    }
+                    Crossfade(mode, animationSpec = androidx.compose.animation.core.tween(160, easing = EaseOutStrong), label = "toolbar", modifier = Modifier.fillMaxWidth().height(TOOLBAR_HEIGHT_DP.dp).background(BaseColors.DarkPanel)) { m ->
+                        when (m) {
+                            ToolMode.MAIN -> ToolRow {
+                                ToolButton(Icons.Rounded.ContentCut, "Изменить") { vm.selectAtPlayhead() }
+                                ToolButton(Icons.Rounded.MusicNote, "Звук", onClick = vm::addAudio)
+                                ToolButton(Icons.Rounded.TextFields, "Текст", onClick = vm::openNewText)
+                                ToolButton(Icons.Rounded.ClosedCaption, "Субтитры", onClick = vm::openCaptions)
+                                ToolButton(Icons.Rounded.AspectRatio, "Формат", onClick = vm::openFormat)
+                                ToolButton(Icons.Rounded.Layers, "Наложение") { soon(ctx) }
+                            }
+                            ToolMode.MEDIA -> ToolRow {
+                                ToolButton(Icons.Rounded.ChevronLeft, "Назад") { vm.select(null) }
+                                ToolButton(Icons.Rounded.VerticalSplit, "Разделить", onClick = vm::split)
+                                ToolButton(Icons.Rounded.Crop, "Кадрирование", onClick = vm::openCrop)
+                                ToolButton(Icons.Rounded.Animation, "Анимации") { soon(ctx) }
+                                ToolButton(Icons.Rounded.DeleteOutline, "Удалить", onClick = vm::deleteSelected)
+                            }
+                            ToolMode.AUDIO -> ToolRow {
+                                ToolButton(Icons.Rounded.ChevronLeft, "Назад") { vm.select(null) }
+                                ToolButton(Icons.Rounded.VerticalSplit, "Разделить", onClick = vm::split)
+                                ToolButton(Icons.Rounded.DeleteOutline, "Удалить", onClick = vm::deleteSelected)
+                            }
+                            ToolMode.TEXT -> texts.firstOrNull { it.id == selText }?.let { t ->
+                                TextToolbar(
+                                    clip = t, sub = textSub, templates = pagTemplates,
+                                    onBack = { vm.select(null) }, onSub = vm::setTextSub, onEditText = vm::openTextInput,
+                                    onSplit = vm::splitText, onDelete = vm::deleteText, onChange = vm::editText,
+                                    onStyle = vm::applyTextStyle, onAnimation = vm::applyTextAnimation, onImportPag = vm::importPag,
+                                )
+                            }
+                            ToolMode.CAPTION -> ToolRow {
+                                ToolButton(Icons.Rounded.ChevronLeft, "Назад") { vm.select(null) }
+                                ToolButton(Icons.Rounded.Edit, "Текст", onClick = vm::openCaptionInput)
+                                ToolButton(Icons.Rounded.VerticalSplit, "Разделить", onClick = vm::splitCaption)
+                                ToolButton(Icons.Rounded.Palette, "Стиль", onClick = vm::openCaptions)
+                                ToolButton(Icons.Rounded.DeleteOutline, "Удалить", onClick = vm::deleteCaption)
+                            }
+                        }
+                    }
+                }
+
+                // пока открыта большая панель (субтитры, переходы, формат) — всё под ней не реагирует на касания
+                if (panelOpen) Box(Modifier.matchParentSize().pointerInput(Unit) {
+                    awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
+                })
+
+                val captionLang by vm.captionLanguage.collectAsStateWithLifecycle()
+                BottomPanel(visible = captionPanel) {
+                    val playhead by vm.playheadMs.collectAsStateWithLifecycle()
+                    CaptionPanel(
+                        items = captionItems, style = captionStyle, generation = captionGen, playheadMs = playhead, editingId = editingCaption,
+                        language = captionLang, onLanguage = vm::setCaptionLanguage,
+                        onGenerate = vm::generateCaptions, onDismissError = vm.captions::dismissError,
+                        onOpenItem = vm::openCaptionItem, onCloseEdit = { vm.editingCaptionId.value = null },
+                        onUpdateText = vm.captions::updateText, onUpdateTiming = vm.captions::updateTiming, onDelete = vm.captions::delete,
+                        onAdd = vm::addCaptionHere, onClearAll = vm.captions::clearAll,
+                        onPreset = vm.captions::applyPreset, onStyle = vm.captions::updateStyle, onClose = vm::closeCaptions,
+                    )
+                }
+                val curFormat by vm.format.collectAsStateWithLifecycle()
+                BottomPanel(visible = formatPanel) { FormatPanel(curFormat, vm::setFormat, vm::closeFormat) }
+                val tf = transitionFor
+                BottomPanel(visible = tf != null && !captionPanel) {
+                    if (tf != null) TransitionPanel(
+                        current = vm.currentTransition(tf), maxMs = transitionMax, items = vm.catalog.items,
+                        onPick = { id, dur -> vm.applyTransition(tf, id, dur) },
+                        onDuration = { dur -> vm.currentTransition(tf)?.let { vm.applyTransition(tf, it.shaderId, dur) } },
+                        onClose = vm::closeTransitions,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Единая кривая появления/исчезновения панелей: сильный ease-out, 120–180 мс. */
+private val EaseOutStrong = androidx.compose.animation.core.CubicBezierEasing(0.23f, 1f, 0.32f, 1f)
+
+private enum class ToolMode { MAIN, MEDIA, AUDIO, TEXT, CAPTION }
+
+/**
+ * Окно предпросмотра. Позиция курсора, «живая» трансформация и пропорции читаются ТОЛЬКО здесь — рекомпозиция
+ * при перемотке ограничена этим блоком. Пропорции рамки берутся из выбранного формата мгновенно (одним кадром);
+ * пока плеер ещё не показал композицию нового формата, старая картинка заполняет рамку (ZOOM), а не сжимается.
+ */
+@UnstableApi
+@Composable
+private fun PreviewStage(
+    vm: EditorViewModel, texts: List<com.base.editor.text.TextClip>, captionItems: List<com.base.editor.captions.CaptionItem>,
+    captionStyle: com.base.editor.captions.CaptionStyle, selected: Long?, fullscreen: Boolean, onToggleFullscreen: () -> Unit, modifier: Modifier,
+) {
+    val playhead by vm.playheadMs.collectAsStateWithLifecycle()
+    val total by vm.totalMs.collectAsStateWithLifecycle()
+    val playing by vm.isPlaying.collectAsStateWithLifecycle()
+    val liveClip by vm.liveClipTransform.collectAsStateWithLifecycle()
+    val aspectNow by vm.canvasAspect.collectAsStateWithLifecycle()
+    val aspectApplied by vm.displayAspect.collectAsStateWithLifecycle()
+    val selText by vm.canvasTextId.collectAsStateWithLifecycle()
+    val clipAspects by vm.clipAspects.collectAsStateWithLifecycle()
+    val cropClip by vm.cropClipId.collectAsStateWithLifecycle()
+    val clips by vm.clips.collectAsStateWithLifecycle()
+    val scrubOn by vm.scrubOverlayOn.collectAsStateWithLifecycle()
+    val scrubFrame by vm.scrubFrame.collectAsStateWithLifecycle()
+    val pending = abs(aspectApplied - aspectNow) > 0.002f
+
+    Box(modifier.fillMaxWidth().background(Color.Black).clipToBounds(), contentAlignment = Alignment.Center) {
+        // рамка выбранного формата: всё, что выходит за её границы, аппаратно отсекается
+        Box(Modifier.aspectRatio(aspectNow.coerceIn(0.2f, 5f)).clipToBounds()) {
             AndroidView(
                 factory = { c ->
                     PlayerView(c).apply {
@@ -220,8 +332,9 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                         player = vm.controller.player
                     }
                 },
+                update = { it.resizeMode = if (pending) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT },
                 modifier = Modifier.fillMaxSize().graphicsLayer {
-                    // пока плеер пересобирается после жеста, показываем разницу между новым и «запечённым» положением
+                    // пока кадр обновляется после жеста, показываем разницу между новым и «запечённым» положением
                     liveClip?.let { l ->
                         transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f + l.baked.x, 0.5f + l.baked.y)
                         translationX = (l.current.x - l.baked.x) * size.width; translationY = (l.current.y - l.baked.y) * size.height
@@ -230,139 +343,94 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     }
                 },
             )
-            val visibleTexts = texts.filter { it.isVisibleAt(playhead) && it.id != draft?.clip?.id } + listOfNotNull(draft?.clip)
-            TextOverlay(visibleTexts.filter { it.pagTemplate == null }, dispAspect)
-            visibleTexts.filter { it.pagTemplate != null }.forEach { PagTitleOverlay(it, playhead, dispAspect) }
-            CaptionOverlay(CaptionOps.captionAt(captionItems, playhead), captionStyle, playhead, dispAspect)
+            // кадр под курсором напрямую из файла, пока плеер на паузе догоняет позицию при перемотке
+            val sf = scrubFrame
+            if (scrubOn && sf != null) Box(Modifier.fillMaxSize().background(Color.Black)) {
+                Image(
+                    sf.image, null, contentScale = androidx.compose.ui.layout.ContentScale.Fit,
+                    modifier = Modifier.fillMaxSize().graphicsLayer {
+                        translationX = sf.transform.x * size.width; translationY = sf.transform.y * size.height
+                        scaleX = sf.transform.scale; scaleY = sf.transform.scale; rotationZ = sf.transform.rotationDeg
+                    },
+                )
+            }
+            val visibleTexts = texts.filter { it.isVisibleAt(playhead) }
+            TextOverlay(visibleTexts.filter { it.pagTemplate == null }, aspectNow, playhead)
+            visibleTexts.filter { it.pagTemplate != null }.forEach { PagTitleOverlay(it, playhead, aspectNow) }
+            CaptionOverlay(CaptionOps.captionAt(captionItems, playhead), captionStyle, playhead, aspectNow)
             // свободные жесты: перемещение / масштаб / поворот выделенного клипа или текста
-            val canvasText by vm.canvasTextId.collectAsStateWithLifecycle()
-            val clipAspects by vm.clipAspects.collectAsStateWithLifecycle()
-            val cropClip by vm.cropClipId.collectAsStateWithLifecycle()
-            val target = remember(selected, canvasText, draft, texts, liveClip, playhead, clips, clipAspects, cropClip) { vm.canvasTarget() }
-            CanvasTransformOverlay(dispAspect, target, visibleTexts, vm)
-          }
-          // полноэкранный режим: иконка внизу справа; в полноэкранном — ещё Play/Pause и время
-          if (fullscreen) {
-              Row(Modifier.align(Alignment.BottomStart).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                  RoundIcon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Воспроизвести", vm::togglePlay, size = 48.dp)
-                  Text("  ${Format.duration(playhead)} / ${Format.duration(total)}", color = Color.White, fontSize = 14.sp)
-              }
-          }
-          Box(Modifier.align(Alignment.BottomEnd).padding(10.dp)) {
-              RoundIcon(if (fullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (fullscreen) "Выйти из полноэкранного режима" else "На весь экран", { fullscreen = !fullscreen })
-          }
+            val target = remember(selected, selText, texts, liveClip, playhead, clips, clipAspects, cropClip) { vm.canvasTarget() }
+            CanvasTransformOverlay(aspectNow, target, visibleTexts, vm)
         }
+        // полноэкранный режим: иконка внизу справа; в полноэкранном — ещё Play/Pause и время
+        if (fullscreen) {
+            Row(Modifier.align(Alignment.BottomStart).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                RoundIcon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Воспроизвести", vm::togglePlay, size = 48.dp)
+                Text("  ${Format.duration(playhead)} / ${Format.duration(total)}", color = Color.White, fontSize = 14.sp)
+            }
+        }
+        Box(Modifier.align(Alignment.BottomEnd).padding(10.dp)) {
+            RoundIcon(if (fullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (fullscreen) "Выйти из полноэкранного режима" else "На весь экран", onToggleFullscreen)
+        }
+    }
+}
 
-        if (!fullscreen) {
-        // время / play / undo-redo
-        Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
-            Row(Modifier.align(Alignment.CenterStart)) {
-                Text(Format.duration(playhead), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
-                Text("  /  ${Format.duration(total)}", color = Color.White.copy(alpha = .5f), fontSize = 14.sp)
-            }
-            RoundIcon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Воспроизвести", vm::togglePlay, size = 52.dp)
-            Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
-                // ромбик ключевого кадра: только когда выбран клип основной дорожки (режим «Изменить»)
-                val selMain = clips.firstOrNull { it.id == selected && it.row == 0 }
-                if (selMain != null) {
-                    val keyAtCursor = vm.hasKeyframeAtCursor()
-                    KeyframeButton(hasKey = keyAtCursor, onClick = vm::toggleKeyframe)
-                    Spacer(Modifier.width(4.dp))
-                }
-                RoundIcon(Icons.Rounded.Undo, "Отменить", vm::undo, enabled = canUndo)
-                RoundIcon(Icons.Rounded.Redo, "Повторить", vm::redo, enabled = canRedo)
-            }
+/** Время / Play / Undo-Redo / ромбик ключа: курсор читается здесь, остальной экран не перекомпонуется. */
+@Composable
+private fun TransportRow(vm: EditorViewModel, hasMainSelected: Boolean) {
+    val playhead by vm.playheadMs.collectAsStateWithLifecycle()
+    val total by vm.totalMs.collectAsStateWithLifecycle()
+    val playing by vm.isPlaying.collectAsStateWithLifecycle()
+    val canUndo by vm.canUndo.collectAsStateWithLifecycle()
+    val canRedo by vm.canRedo.collectAsStateWithLifecycle()
+    Box(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), contentAlignment = Alignment.Center) {
+        Row(Modifier.align(Alignment.CenterStart)) {
+            Text(Format.duration(playhead), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
+            Text("  /  ${Format.duration(total)}", color = Color.White.copy(alpha = .5f), fontSize = 14.sp)
         }
+        RoundIcon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Воспроизвести", vm::togglePlay, size = 52.dp)
+        Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
+            // ромбик ключевого кадра: только когда выбран клип основной дорожки (режим «Изменить»)
+            if (hasMainSelected) {
+                KeyframeButton(hasKey = vm.hasKeyframeAtCursor(), onClick = vm::toggleKeyframe)
+                Spacer(Modifier.width(4.dp))
+            }
+            RoundIcon(Icons.Rounded.Undo, "Отменить", vm::undo, enabled = canUndo)
+            RoundIcon(Icons.Rounded.Redo, "Повторить", vm::redo, enabled = canRedo)
+        }
+    }
+}
 
-        // Нижняя область ФИКСИРОВАННОЙ высоты: таймлайн + панель инструментов.
-        // Панели (субтитры, переходы) выезжают поверх неё и не меняют размеры соседей.
-        val panelOpen = captionPanel || transitionFor != null || formatPanel || (draft != null && !textInput)
-        Box(Modifier.fillMaxWidth().height((TL_HEIGHT_DP + TOOLBAR_HEIGHT_DP).dp).background(BaseColors.DarkBg)) {
-            Column(Modifier.fillMaxSize()) {
-                Box(Modifier.fillMaxWidth().height(TL_HEIGHT_DP.dp)) {
-                    TimelineView(clips, transitions, captionItems, texts, keyframes, selected, playhead, total, zoom, vm, Modifier.fillMaxWidth())
-                    // кнопка «звук клипа» слева от нулевой отметки — уезжает вместе со шкалой
-                    val scrollPx = playhead * zoom * density.density / 1000f
-                    Column(
-                        Modifier.offset { IntOffset(-scrollPx.roundToInt(), with(density) { 36.dp.roundToPx() }) }.padding(start = 12.dp).width(64.dp)
-                            .clip(RoundedCornerShape(10.dp)).clickable(onClick = vm::toggleMute).padding(vertical = 4.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Icon(if (muted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp, null, tint = Color.White, modifier = Modifier.size(26.dp))
-                        Text(if (muted) "Вкл. звук клипа" else "Выкл. звук клипа", color = Color.White.copy(alpha = .8f), fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp)
-                    }
-                    // «+» закреплён у правого края на уровне основной дорожки — доступен при любой прокрутке и зуме
-                    Box(
-                        Modifier.align(Alignment.TopEnd).padding(top = 46.dp, end = 8.dp).size(44.dp)
-                            .shadow(6.dp, CircleShape).clip(CircleShape).background(Color.White).clickable(onClick = vm::addMedia),
-                        contentAlignment = Alignment.Center,
-                    ) { Icon(Icons.Rounded.Add, "Добавить видео или фото", tint = Color.Black, modifier = Modifier.size(28.dp)) }
-                }
-                Crossfade(selected != null, label = "toolbar", modifier = Modifier.fillMaxWidth().height(TOOLBAR_HEIGHT_DP.dp).background(BaseColors.DarkPanel)) { hasSel ->
-                    if (!hasSel) {
-                        ToolRow {
-                            ToolButton(Icons.Rounded.ContentCut, "Изменить") { vm.selectAtPlayhead() }
-                            ToolButton(Icons.Rounded.MusicNote, "Звук", onClick = vm::addAudio)
-                            ToolButton(Icons.Rounded.TextFields, "Текст", onClick = vm::openNewText)
-                            ToolButton(Icons.Rounded.ClosedCaption, "Субтитры", onClick = vm::openCaptions)
-                            ToolButton(Icons.Rounded.AspectRatio, "Формат", onClick = vm::openFormat)
-                            ToolButton(Icons.Rounded.Layers, "Наложение") { soon(ctx) }
-                        }
-                    } else {
-                        ToolRow {
-                            ToolButton(Icons.Rounded.ChevronLeft, "Назад") { vm.select(null) }
-                            ToolButton(Icons.Rounded.VerticalSplit, "Разделить", onClick = vm::split)
-                            ToolButton(Icons.Rounded.Crop, "Кадрирование", onClick = vm::openCrop)
-                            ToolButton(Icons.Rounded.Animation, "Анимации") { soon(ctx) }
-                            ToolButton(Icons.Rounded.DeleteOutline, "Удалить", onClick = vm::deleteSelected)
-                        }
-                    }
-                }
-            }
-
-            // пока открыта панель — всё, что под ней, не реагирует на касания
-            if (panelOpen) Box(Modifier.matchParentSize().pointerInput(Unit) {
-                awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
-            })
-
-            val captionLang by vm.captionLanguage.collectAsStateWithLifecycle()
-            BottomPanel(visible = captionPanel) {
-                CaptionPanel(
-                    items = captionItems, style = captionStyle, generation = captionGen, playheadMs = playhead, editingId = editingCaption,
-                    language = captionLang, onLanguage = vm::setCaptionLanguage,
-                    onGenerate = vm::generateCaptions, onDismissError = vm.captions::dismissError,
-                    onOpenItem = vm::openCaptionItem, onCloseEdit = { vm.editingCaptionId.value = null },
-                    onUpdateText = vm.captions::updateText, onUpdateTiming = vm.captions::updateTiming, onDelete = vm.captions::delete,
-                    onAdd = vm::addCaptionHere, onClearAll = vm.captions::clearAll,
-                    onPreset = vm.captions::applyPreset, onStyle = vm.captions::updateStyle, onClose = vm::closeCaptions,
-                )
-            }
-            val cropId by vm.cropClipId.collectAsStateWithLifecycle()
-        if (cropId != null) {
-            val frame by vm.cropFrame.collectAsStateWithLifecycle()
-            val init by vm.cropInitial.collectAsStateWithLifecycle()
-            CropDialog(frame, init, onDone = vm::applyCrop, onCancel = vm::cancelCrop)
+/** Таймлайн с закреплёнными кнопками; курсор и зум читаются здесь. */
+@Composable
+private fun TimelineHost(
+    vm: EditorViewModel, clips: List<com.base.editor.core.Clip>, transitions: List<com.base.editor.core.Transition>,
+    captionItems: List<com.base.editor.captions.CaptionItem>, texts: List<com.base.editor.text.TextClip>,
+    keyframes: Map<Long, List<com.base.editor.core.Keyframe>>, selected: Long?, selText: String?, selCaption: String?,
+) {
+    val density = LocalDensity.current
+    val playhead by vm.playheadMs.collectAsStateWithLifecycle()
+    val total by vm.totalMs.collectAsStateWithLifecycle()
+    val zoom by vm.pxPerSec.collectAsStateWithLifecycle()
+    val muted by vm.muted.collectAsStateWithLifecycle()
+    Box(Modifier.fillMaxWidth().height(TL_HEIGHT_DP.dp)) {
+        TimelineView(clips, transitions, captionItems, texts, keyframes, selected, selText, selCaption, playhead, total, zoom, vm, Modifier.fillMaxWidth())
+        // кнопка «звук клипа» слева от нулевой отметки — уезжает вместе со шкалой
+        val scrollPx = playhead * zoom * density.density / 1000f
+        Column(
+            Modifier.offset { IntOffset(-scrollPx.roundToInt(), with(density) { 36.dp.roundToPx() }) }.padding(start = 12.dp).width(64.dp)
+                .clip(RoundedCornerShape(10.dp)).clickable(onClick = vm::toggleMute).padding(vertical = 4.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Icon(if (muted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp, null, tint = Color.White, modifier = Modifier.size(26.dp))
+            Text(if (muted) "Вкл. звук клипа" else "Выкл. звук клипа", color = Color.White.copy(alpha = .8f), fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp)
         }
-        val curFormat by vm.format.collectAsStateWithLifecycle()
-            BottomPanel(visible = formatPanel) { FormatPanel(curFormat, vm::setFormat, vm::closeFormat) }
-            val textPanelClip = draft
-            BottomPanel(visible = textPanelClip != null && !textInput) {
-                if (textPanelClip != null) TextContextPanel(
-                    textPanelClip.clip, textPanelClip.isNew, onChange = vm::updateTextDraft, templates = pagTemplates, onImportPag = vm::importPag,
-                    onEditText = vm::openTextInput, onSplit = vm::splitText, onDelete = vm::deleteText, onDone = vm::commitText,
-                )
-            }
-            val tf = transitionFor
-            BottomPanel(visible = tf != null && !captionPanel) {
-                if (tf != null) TransitionPanel(
-                    current = vm.currentTransition(tf), maxMs = transitionMax, items = vm.catalog.items,
-                    onPick = { id, dur -> vm.applyTransition(tf, id, dur) },
-                    onDuration = { dur -> vm.currentTransition(tf)?.let { vm.applyTransition(tf, it.shaderId, dur) } },
-                    onClose = vm::closeTransitions,
-                )
-            }
-        }
-        }
+        // «+» закреплён у правого края на уровне основной дорожки — доступен при любой прокрутке и зуме
+        Box(
+            Modifier.align(Alignment.TopEnd).padding(top = 46.dp, end = 8.dp).size(44.dp)
+                .shadow(6.dp, CircleShape).clip(CircleShape).background(Color.White).clickable(onClick = vm::addMedia),
+            contentAlignment = Alignment.Center,
+        ) { Icon(Icons.Rounded.Add, "Добавить видео или фото", tint = Color.Black, modifier = Modifier.size(28.dp)) }
     }
 }
 
@@ -391,12 +459,12 @@ private fun FormatPanel(current: com.base.editor.core.CanvasFormat, onPick: (com
     }
 }
 
-/** Панель, выезжающая снизу поверх фиксированной области (не влияет на размеры соседей). */
+/** Панель поверх фиксированной области (не влияет на размеры соседей); появляется плавно (fade), без вылета снизу. */
 @Composable
 private fun BoxScope.BottomPanel(visible: Boolean, content: @Composable () -> Unit) {
     AnimatedVisibility(
         visible = visible, modifier = Modifier.align(Alignment.BottomCenter),
-        enter = slideInVertically { it } + fadeIn(), exit = slideOutVertically { it } + fadeOut(),
+        enter = fadeIn(androidx.compose.animation.core.tween(180, easing = EaseOutStrong)), exit = fadeOut(androidx.compose.animation.core.tween(120, easing = EaseOutStrong)),
     ) { content() }
 }
 

@@ -27,6 +27,16 @@ data class TextClip(
     val pagTemplate: String? = null,
     /** Шрифт из [TextFonts]. */
     val fontId: String = "MONTSERRAT",
+    /** Контур: цвет ARGB (0 — нет) и толщина в долях размера шрифта. */
+    val strokeColor: Long = 0,
+    val strokeWidth: Float = 0f,
+    /** Тень/свечение: цвет ARGB (0 — нет), размытие и смещение по Y в долях размера шрифта. */
+    val shadowColor: Long = 0,
+    val shadowBlur: Float = 0f,
+    val shadowDy: Float = 0f,
+    /** Пресет стиля (для подсветки в карусели) и анимация появления из [TextAnimation]. */
+    val styleId: String = "plain",
+    val animId: String = "none",
 ) {
     val endMs get() = startMs + durationMs
     val hasBackground get() = (backgroundColor ushr 24) > 0L

@@ -328,6 +328,13 @@ class TimelineController(
         }
     }
 
+    /** Короткое воспроизведение фрагмента (предпросмотр анимации текста): с [fromMs], остановка на [toMs]. */
+    fun playRange(fromMs: Long, toMs: Long) {
+        pause(); seekTo(fromMs)
+        stopAtMs = toMs
+        if (playerReady) resumePlayer() else playWhenReady = true
+    }
+
     /** Сбрасывает недоставленные цели перемотки (резкий свайп, play, явный seek). */
     private fun cancelScrub() { scrubTarget = -1; scrubJob?.cancel(); scrubJob = null }
 

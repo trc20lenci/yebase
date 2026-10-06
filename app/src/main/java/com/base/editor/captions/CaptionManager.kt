@@ -87,6 +87,16 @@ class CaptionManager(
     /** Перетаскивание карточки по шкале (долгое нажатие на таймлайне). */
     fun moveTo(id: String, startMs: Long) = edit(id) { CaptionOps.shift(it, startMs) }
 
+    fun trim(id: String, startMs: Long, endMs: Long) = edit(id) { CaptionOps.trim(it, startMs, endMs) }
+
+    /** «Разделить» по курсору. false — курсор вне карточки или слишком близко к краю. */
+    fun split(id: String, atMs: Long): Boolean {
+        val item = _items.value.firstOrNull { it.id == id } ?: return false
+        val (a, b) = CaptionOps.split(item, atMs) ?: return false
+        _items.update { l -> (l.filterNot { it.id == id } + a + b).sortedBy { it.startMs } }; changed()
+        return true
+    }
+
     fun delete(id: String) { _items.update { l -> l.filterNot { it.id == id } }; changed() }
 
     /** Добавляет пустую карточку на позиции курсора и возвращает её id. */

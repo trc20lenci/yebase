@@ -72,7 +72,7 @@ import kotlin.math.roundToInt
 @Composable
 fun TimelineView(
     clips: List<Clip>, transitions: List<Transition>, captions: List<CaptionItem>, texts: List<TextClip>,
-    keyframes: Map<Long, List<com.base.editor.core.Keyframe>>, selectedId: Long?, playheadMs: Long, totalMs: Long, pxPerSecDp: Float,
+    keyframes: Map<Long, List<com.base.editor.core.Keyframe>>, selectedId: Long?, selectedTextId: String?, selectedCaptionId: String?, playheadMs: Long, totalMs: Long, pxPerSecDp: Float,
     actions: TimelineActions, modifier: Modifier = Modifier,
 ) {
     val ctx = LocalContext.current
@@ -83,7 +83,7 @@ fun TimelineView(
     var tick by remember { mutableIntStateOf(0) }          // перерисовка после подгрузки миниатюр
 
     val geo = Geo(density, widthPx.toFloat(), playheadMs, pxPerSecDp)
-    val cur by rememberUpdatedState(TlState(geo, clips, transitions, captions, texts, keyframes, selectedId, totalMs))
+    val cur by rememberUpdatedState(TlState(geo, clips, transitions, captions, texts, keyframes, selectedId, selectedTextId, selectedCaptionId, totalMs))
     val act by rememberUpdatedState(actions)
 
     // Очередь миниатюр: draw только регистрирует недостающие ключи, загрузка — здесь.
@@ -117,13 +117,16 @@ fun TimelineView(
                         is Hit.Junction -> act.openTransitions(h.leftId)
                         is Hit.Text -> act.openText(h.id)
                         is Hit.Caption -> act.openCaption(h.id)
+                        is Hit.TextHandle -> act.openText(h.id)
+                        is Hit.CaptionHandle -> act.openCaption(h.id)
                         Hit.AudioSlot -> act.addAudio()
                         Hit.TextSlot -> act.addText()
                         Hit.None -> act.select(null)
                     }
 
                     // Долгое нажатие на блок текста/субтитров: блок «отрывается» и едет за пальцем вдоль шкалы времени
-                    if (hit is Hit.Text || hit is Hit.Caption) {
+                    val selectedBlock = (hit is Hit.Text && hit.id == s0.selectedTextId) || (hit is Hit.Caption && hit.id == s0.selectedCaptionId)
+                    if (selectedBlock) {
                         val pressed = awaitLongPressOrCancellation(down.id)
                         if (pressed != null) {
                             val baseStart = when (hit) {
@@ -146,6 +149,7 @@ fun TimelineView(
                     }
                     var mode = Mode.PENDING
                     var startClip: Clip? = null
+                    var baseS = 0L; var baseE = 0L
                     var ph = s0.geo.playheadMs.toDouble()
                     var pinchLast = 0f
                     val tracker = VelocityTracker().also { it.addPosition(down.uptimeMillis, down.position) }
@@ -171,11 +175,15 @@ fun TimelineView(
                         if (mode == Mode.PENDING && abs(total.x) > slop) {
                             mode = when (hit) {
                                 is Hit.Handle -> if (hit.start) Mode.TRIM_START else Mode.TRIM_END
+                                is Hit.TextHandle -> if (hit.start) Mode.TRIM_T_START else Mode.TRIM_T_END
+                                is Hit.CaptionHandle -> if (hit.start) Mode.TRIM_C_START else Mode.TRIM_C_END
                                 is Hit.Body -> if (hit.clip.id == s0.selectedId) Mode.MOVE else Mode.SCROLL
                                 else -> Mode.SCROLL
                             }
                             when (mode) {
                                 Mode.SCROLL -> act.scrubStart()
+                                Mode.TRIM_T_START, Mode.TRIM_T_END -> s0.texts.firstOrNull { it.id == (hit as Hit.TextHandle).id }?.let { baseS = it.startMs; baseE = it.endMs }
+                                Mode.TRIM_C_START, Mode.TRIM_C_END -> s0.captions.firstOrNull { it.id == (hit as Hit.CaptionHandle).id }?.let { baseS = it.startMs; baseE = it.endMs }
                                 else -> { startClip = (hit as? Hit.Body)?.clip ?: (hit as Hit.Handle).clip; act.editBegin() }
                             }
                         }
@@ -189,6 +197,10 @@ fun TimelineView(
                             Mode.MOVE -> act.moveClip(startClip!!.id, startClip.startMs + dMs)
                             Mode.TRIM_START -> act.trimStart(startClip!!.id, startClip.startMs + dMs)
                             Mode.TRIM_END -> act.trimEnd(startClip!!.id, startClip.endMs + dMs)
+                            Mode.TRIM_T_START -> act.trimText((hit as Hit.TextHandle).id, baseS + dMs, baseE)
+                            Mode.TRIM_T_END -> act.trimText((hit as Hit.TextHandle).id, baseS, baseE + dMs)
+                            Mode.TRIM_C_START -> act.trimCaption((hit as Hit.CaptionHandle).id, baseS + dMs, baseE)
+                            Mode.TRIM_C_END -> act.trimCaption((hit as Hit.CaptionHandle).id, baseS, baseE + dMs)
                             else -> Unit
                         }
                         ch.consume()
@@ -208,7 +220,7 @@ fun TimelineView(
                             }
                         }
                         Mode.MOVE, Mode.TRIM_START, Mode.TRIM_END -> act.editEnd()
-                        Mode.ZOOM -> Unit
+                        Mode.ZOOM, Mode.TRIM_T_START, Mode.TRIM_T_END, Mode.TRIM_C_START, Mode.TRIM_C_END -> Unit
                     }
                 }
             },
@@ -223,7 +235,7 @@ fun TimelineView(
 
 /** Высота таймлайна фиксирована: экран не «прыгает» при появлении дорожек. */
 const val TL_HEIGHT_DP = 250
-private enum class Mode { PENDING, SCROLL, MOVE, TRIM_START, TRIM_END, ZOOM }
+private enum class Mode { PENDING, SCROLL, MOVE, TRIM_START, TRIM_END, ZOOM, TRIM_T_START, TRIM_T_END, TRIM_C_START, TRIM_C_END }
 private class ThumbReq(val key: String, val uri: String, val type: MediaType, val bucketMs: Long, val h: Int)
 
 private sealed interface Hit {
@@ -232,6 +244,8 @@ private sealed interface Hit {
     class Junction(val leftId: Long) : Hit
     class Text(val id: String) : Hit
     class Caption(val id: String) : Hit
+    class TextHandle(val id: String, val start: Boolean) : Hit
+    class CaptionHandle(val id: String, val start: Boolean) : Hit
     data object AudioSlot : Hit
     data object TextSlot : Hit
     data object None : Hit
@@ -254,7 +268,7 @@ class Geo(private val d: Density, val width: Float, val playheadMs: Long, val px
 
 private class TlState(
     val geo: Geo, val clips: List<Clip>, val transitions: List<Transition>, val captions: List<CaptionItem>, val texts: List<TextClip>,
-    val keyframes: Map<Long, List<com.base.editor.core.Keyframe>>, val selectedId: Long?, val totalMs: Long,
+    val keyframes: Map<Long, List<com.base.editor.core.Keyframe>>, val selectedId: Long?, val selectedTextId: String?, val selectedCaptionId: String?, val totalMs: Long,
 ) {
     val audioClips: List<Clip> = clips.filter { it.row != 0 && it.type == MediaType.AUDIO }.sortedBy { it.startMs }
 
@@ -296,10 +310,20 @@ private class TlState(
             if (p.x >= g.x(0)) return Hit.AudioSlot
         }
         if (p.y in g.textTop..(g.textTop + g.slotH)) {
+            texts.firstOrNull { it.id == selectedTextId }?.let { t ->
+                val l = g.x(t.startMs); val r = g.x(t.endMs); val hw = min(g.handleW, (r - l) / 4)
+                if (p.x in (l - g.handleSlop)..(l + hw + g.handleSlop / 2)) return Hit.TextHandle(t.id, true)
+                if (p.x in (r - hw - g.handleSlop / 2)..(r + g.handleSlop)) return Hit.TextHandle(t.id, false)
+            }
             texts.lastOrNull { p.x in g.x(it.startMs)..g.x(it.endMs) }?.let { return Hit.Text(it.id) }
             if (p.x >= g.x(0)) return Hit.TextSlot
         }
         if (p.y in g.capTop..(g.capTop + g.slotH)) {
+            captions.firstOrNull { it.id == selectedCaptionId }?.let { c ->
+                val l = g.x(c.startMs); val r = g.x(c.endMs); val hw = min(g.handleW, (r - l) / 4)
+                if (p.x in (l - g.handleSlop)..(l + hw + g.handleSlop / 2)) return Hit.CaptionHandle(c.id, true)
+                if (p.x in (r - hw - g.handleSlop / 2)..(r + g.handleSlop)) return Hit.CaptionHandle(c.id, false)
+            }
             captions.firstOrNull { p.x in g.x(it.startMs)..g.x(it.endMs) }?.let { return Hit.Caption(it.id) }
         }
         return Hit.None
@@ -351,8 +375,23 @@ private fun DrawScope.drawTimeline(s: TlState, measurer: TextMeasurer, pending: 
             }
         }
     }
-    s.texts.forEach { t -> block(g.textTop, g.x(t.startMs), g.x(t.endMs), Color(0xFFFF9800).copy(alpha = .55f), t.text) }
-    s.captions.forEach { c -> block(g.capTop, g.x(c.startMs), g.x(c.endMs), BaseColors.Cyan.copy(alpha = .35f), c.text) }
+    // рамка и белые ручки обрезки у выделенного блока (общий вид для текста, субтитров и аудио)
+    fun handles(top: Float, l: Float, r: Float) {
+        if (r - l <= 8f) return
+        val hw = min(g.handleW, (r - l) / 4)
+        val y = top + 4.dp.toPx(); val hgt = g.slotH - 8.dp.toPx()
+        drawRoundRect(Color.White, Offset(l, y), Size(max(2f, r - l - 2f), hgt), CornerRadius(6.dp.toPx()), Stroke(2.dp.toPx()))
+        drawRoundRect(Color.White, Offset(l, y), Size(hw, hgt), CornerRadius(4.dp.toPx()))
+        drawRoundRect(Color.White, Offset(r - hw - 2f, y), Size(hw, hgt), CornerRadius(4.dp.toPx()))
+    }
+    s.texts.forEach { t ->
+        block(g.textTop, g.x(t.startMs), g.x(t.endMs), Color(0xFFFF9800).copy(alpha = .55f), t.text)
+        if (t.id == s.selectedTextId) handles(g.textTop, g.x(t.startMs), g.x(t.endMs))
+    }
+    s.captions.forEach { c ->
+        block(g.capTop, g.x(c.startMs), g.x(c.endMs), BaseColors.Cyan.copy(alpha = .35f), c.text)
+        if (c.id == s.selectedCaptionId) handles(g.capTop, g.x(c.startMs), g.x(c.endMs))
+    }
 
     // блоки музыки на аудиодорожке: имя файла + длительность; выбранный — с рамкой и ручками обрезки
     s.audioClips.forEach { c ->

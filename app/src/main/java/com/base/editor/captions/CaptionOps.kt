@@ -44,6 +44,24 @@ object CaptionOps {
         return item.copy(startMs = start, endMs = end, words = item.words.map { it.copy(startMs = map(it.startMs), endMs = map(it.endMs)) })
     }
 
+    /** Подрезка края карточки (ручки на таймлайне): окно меняется, тайминги слов остаются прежними. */
+    fun trim(item: CaptionItem, newStartMs: Long, newEndMs: Long): CaptionItem {
+        val start = max(0, newStartMs)
+        val end = max(start + MIN_DURATION_MS, newEndMs)
+        return item.copy(startMs = start, endMs = end)
+    }
+
+    /** Делит карточку по времени на две независимые: слово уходит в ту часть, куда попадает его середина. */
+    fun split(item: CaptionItem, atMs: Long): Pair<CaptionItem, CaptionItem>? {
+        if (atMs <= item.startMs + MIN_DURATION_MS || atMs >= item.endMs - MIN_DURATION_MS) return null
+        val left = item.words.filter { (it.startMs + it.endMs) / 2 < atMs }
+        val right = item.words.filter { (it.startMs + it.endMs) / 2 >= atMs }
+        if (left.isEmpty() || right.isEmpty()) return null
+        fun make(id: String, s: Long, e: Long, ws: List<WordTimestamp>) =
+            CaptionItem(id, s, e, ws.joinToString(" ") { it.word }, ws.map { it.copy(startMs = it.startMs.coerceIn(s, e), endMs = it.endMs.coerceIn(s, e)) })
+        return make(item.id, item.startMs, atMs, left) to make(java.util.UUID.randomUUID().toString(), atMs, item.endMs, right)
+    }
+
     /** Сдвиг карточки целиком (длительность и пословные тайминги сохраняются). */
     fun shift(item: CaptionItem, newStartMs: Long): CaptionItem {
         val d = max(0, newStartMs) - item.startMs

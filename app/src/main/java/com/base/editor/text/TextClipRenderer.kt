@@ -5,6 +5,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.text.AnnotatedString
@@ -38,13 +41,17 @@ object TextClipRenderer {
 
     private class Laid(val layout: androidx.compose.ui.text.TextLayoutResult, val fontPx: Float, val padX: Float, val padY: Float, val left: Float, val top: Float, val boxW: Float, val boxH: Float)
 
-    private fun DrawScope.lay(measurer: TextMeasurer, clip: TextClip): Laid {
+    private fun DrawScope.lay(measurer: TextMeasurer, clip: TextClip, visibleChars: Int = Int.MAX_VALUE): Laid {
         val fontPx = max(6f, clip.fontSizeSp / REFERENCE_HEIGHT * size.height)
         val maxW = max(8f, size.width * 0.90f)
         val padX = if (clip.hasBackground) fontPx * 0.45f else 0f
         val padY = if (clip.hasBackground) fontPx * 0.25f else 0f
         val layout = measurer.measure(
-            AnnotatedString(clip.text),
+            if (visibleChars >= clip.text.length) AnnotatedString(clip.text)
+            else androidx.compose.ui.text.buildAnnotatedString {            // Typewriter: непропечатанная часть прозрачна, раскладка не прыгает
+                append(clip.text)
+                addStyle(androidx.compose.ui.text.SpanStyle(color = Color.Transparent), visibleChars.coerceAtLeast(0), clip.text.length)
+            },
             TextStyle(fontSize = fontPx.toSp(), fontFamily = TextFonts.family(clip.fontId), fontWeight = FontWeight.Bold, textAlign = TextAlign.Center),
             softWrap = true,
             constraints = Constraints(maxWidth = max(1, (maxW - padX * 2).toInt())),
@@ -62,15 +69,35 @@ object TextClipRenderer {
         Box(l.left + l.boxW / 2, l.top + l.boxH / 2, l.boxW, l.boxH, clip.rotationDeg)
     }.getOrNull()
 
-    fun DrawScope.drawTextClip(measurer: TextMeasurer, clip: TextClip) {
+    /**
+     * [localMs] — время от начала слоя (для анимации появления); без него слой рисуется в конечном состоянии.
+     * Слои: плашка → тень/свечение → контур (STROKE, скруглённые стыки — внутренние отверстия букв остаются чистыми) → заливка.
+     */
+    fun DrawScope.drawTextClip(measurer: TextMeasurer, clip: TextClip, localMs: Long = Long.MAX_VALUE) {
         if (clip.text.isBlank() || size.width < 8f || size.height < 8f) return
         try {
-            val l = lay(measurer, clip)
-            withTransform({ rotate(clip.rotationDeg, Offset(l.left + l.boxW / 2, l.top + l.boxH / 2)) }) {
-                if (clip.hasBackground) drawRoundRect(Color(clip.backgroundColor), Offset(l.left, l.top), Size(l.boxW, l.boxH), CornerRadius(l.fontPx * 0.3f))
-                // фиксированная тень без размытия (offset 2 dp, чёрный 40%) — буквы не слипаются в кляксу
-                val shadow = if (clip.hasBackground) null else Shadow(Color(0x66000000), Offset(0f, 2.dp.toPx()), blurRadius = 0f)
-                drawText(l.layout, color = Color(clip.textColor), topLeft = Offset(l.left + l.padX, l.top + l.padY), shadow = shadow)
+            val a = TextAnimator.frame(clip, localMs)
+            if (a.alpha <= 0f) return
+            val visible = if (a.visibleFraction >= 1f) Int.MAX_VALUE else kotlin.math.ceil(clip.text.length * a.visibleFraction).toInt()
+            val l = lay(measurer, clip, visible)
+            val pivot = Offset(l.left + l.boxW / 2, l.top + l.boxH / 2)
+            fun Color.al() = copy(alpha = alpha * a.alpha)
+            withTransform({
+                translate(a.dx * size.width, 0f)
+                if (a.scale != 1f) scale(a.scale, a.scale, pivot)
+                rotate(clip.rotationDeg, pivot)
+            }) {
+                if (clip.hasBackground) drawRoundRect(Color(clip.backgroundColor).al(), Offset(l.left, l.top), Size(l.boxW, l.boxH), CornerRadius(l.fontPx * 0.3f))
+                val at = Offset(l.left + l.padX, l.top + l.padY)
+                val shadow = if (clip.shadowColor != 0L)
+                    Shadow(Color(clip.shadowColor).al(), Offset(0f, clip.shadowDy * l.fontPx), blurRadius = clip.shadowBlur * l.fontPx)
+                else null
+                if (clip.strokeColor != 0L && clip.strokeWidth > 0f) {
+                    // контур отдельным проходом под заливкой: толстая обводка со скруглёнными стыками, без размытия
+                    drawText(l.layout, color = Color(clip.strokeColor).al(), topLeft = at, shadow = shadow,
+                        drawStyle = Stroke(width = clip.strokeWidth * l.fontPx * 2f, join = StrokeJoin.Round, cap = StrokeCap.Round))
+                    drawText(l.layout, color = Color(clip.textColor).al(), topLeft = at)
+                } else drawText(l.layout, color = Color(clip.textColor).al(), topLeft = at, shadow = shadow)
             }
         } catch (_: Exception) {
             // zero-crash

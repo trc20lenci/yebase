@@ -42,12 +42,13 @@ class TextBitmapOverlay(context: Context, private val clips: List<TextClip>, can
         val t = presentationTimeUs / 1000
         val active = clips.filter { it.isVisibleAt(t) }
         if (active.isEmpty()) { lastKey = null; return blank }
-        val key = active.map { it.id }
+        // ключ кэша: набор слоёв + фаза анимации появления (пока она идёт, картинка обновляется ~30 раз/с)
+        val key = active.map { "${it.id}:${com.base.editor.text.TextAnimator.phase(it, t - it.startMs)}" }
         if (key != lastKey) {
             lastKey = key
             bitmap.eraseColor(Color.TRANSPARENT)
             scope.draw(Density(1f), LayoutDirection.Ltr, composeCanvas, Size(w.toFloat(), h.toFloat())) {
-                active.forEach { drawTextClip(measurer, it) }
+                active.forEach { drawTextClip(measurer, it, t - it.startMs) }
             }
         }
         return bitmap

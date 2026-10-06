@@ -13,10 +13,10 @@ import com.base.editor.text.TextClipRenderer.drawTextClip
 
 /** Текстовые слои поверх видео; область рисования повторяет границы кадра, как и в экспорте. */
 @Composable
-fun TextOverlay(clips: List<TextClip>, videoAspect: Float, modifier: Modifier = Modifier) {
+fun TextOverlay(clips: List<TextClip>, videoAspect: Float, playheadMs: Long, modifier: Modifier = Modifier) {
     if (clips.isEmpty()) return
     val measurer = rememberTextMeasurer(cacheSize = 32)
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-        Canvas(Modifier.aspectRatio(videoAspect.coerceIn(0.2f, 5f))) { clips.forEach { drawTextClip(measurer, it) } }
+        Canvas(Modifier.aspectRatio(videoAspect.coerceIn(0.2f, 5f))) { clips.forEach { drawTextClip(measurer, it, playheadMs - it.startMs) } }
     }
 }
