@@ -333,16 +333,19 @@ private fun PreviewStage(
     Box(modifier.fillMaxWidth().background(Color.Black).clipToBounds(), contentAlignment = Alignment.Center) {
         // рамка выбранного формата: всё, что выходит за её границы, аппаратно отсекается
         Box(Modifier.aspectRatio(aspectNow.coerceIn(0.2f, 5f)).clipToBounds()) {
+            val surfaceTick by vm.controller.surfaceReset.collectAsStateWithLifecycle()
             AndroidView(
                 factory = { c ->
-                    PlayerView(c).apply {
-                        useController = false
-                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                        setShutterBackgroundColor(android.graphics.Color.BLACK)
+                    // TextureView-вариант PlayerView: подчиняется graphicsLayer, поэтому жест виден на кадре мгновенно
+                    (android.view.LayoutInflater.from(c).inflate(R.layout.view_player_texture, null) as PlayerView).apply {
                         player = vm.controller.player
+                        tag = surfaceTick
                     }
                 },
-                update = { it.resizeMode = if (pending) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT },
+                update = {
+                    it.resizeMode = if (pending) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    if (it.tag != surfaceTick) { it.player = null; it.player = vm.controller.player; it.tag = surfaceTick }   // сброс залипшей поверхности
+                },
                 modifier = Modifier.fillMaxSize().graphicsLayer {
                     // пока кадр обновляется после жеста, показываем разницу между новым и «запечённым» положением
                     liveClip?.let { l ->

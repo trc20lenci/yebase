@@ -2,6 +2,7 @@ package com.base.editor.media
 
 import android.content.Context
 import android.os.Looper
+import android.os.SystemClock
 import android.util.Log
 import android.util.Size
 import androidx.media3.common.PlaybackException
@@ -271,8 +272,22 @@ class TimelineController(
         scrubEnd()                                                // доставить последнюю позицию перемотки
         if (_playhead.value >= _state.value.totalMs - 50) seekTo(0)
         if (!playerReady) { playWhenReady = true; return }        // композиция ещё готовится: стартуем, как только будет READY
+        if (scrubbedSincePlay) {
+            // после частой перемотки декодер/поверхность могут залипнуть (звук идёт, кадр стоит): переподключаем
+            // поверхность и перемещаем плеер в ту же позицию (flush декодера), и только потом запускаем воспроизведение
+            scrubbedSincePlay = false
+            refreshVideoSurface()
+            scope.launch {
+                delay(SURFACE_REBIND_MS)
+                if (playerReady) { seekPlayerSafely(player.currentPosition); resumePlayer() } else playWhenReady = true
+            }
+            return
+        }
         resumePlayer()
     }
+
+    /** Просит интерфейс заново привязать поверхность видео к плееру. */
+    fun refreshVideoSurface() { _surfaceReset.value++ }
 
     /** Play в любом состоянии: из IDLE — prepare, из ENDED — с начала, из BUFFERING — стартует сам по готовности. */
     private fun resumePlayer() {
@@ -305,6 +320,13 @@ class TimelineController(
 
     // ───────── живая перемотка пальцем ─────────
     private var scrubTarget = -1L
+    @Volatile private var seekInFlight = false
+    private var lastSeekAt = 0L
+    private var scrubbedSincePlay = false
+    private var bufferingJob: Job? = null
+    private val _surfaceReset = MutableStateFlow(0)
+    /** Счётчик «переподключить поверхность видео»: интерфейс пересоздаёт привязку PlayerView к плееру. */
+    val surfaceReset: StateFlow<Int> = _surfaceReset.asStateFlow()
     private var scrubJob: Job? = null
 
     /**
@@ -317,10 +339,13 @@ class TimelineController(
         if (total <= 0) return
         val v = ms.coerceIn(0L, total)
         _playhead.value = v
+        scrubbedSincePlay = true
         scrubTarget = v
         if (scrubJob?.isActive == true) return
         scrubJob = scope.launch {
             while (isActive && scrubTarget >= 0) {
+                // не заваливаем декодер: пока предыдущий seek не обработан, новый не отправляем (но не дольше SEEK_INFLIGHT_MAX_MS)
+                if (seekInFlight && SystemClock.uptimeMillis() - lastSeekAt < SEEK_INFLIGHT_MAX_MS) { delay(12); continue }
                 val t = scrubTarget; scrubTarget = -1
                 if (!playerReady || player.playbackState == Player.STATE_IDLE) { pendingSeekMs = t } else seekPlayerSafely(t)
                 delay(SCRUB_MS)
@@ -346,7 +371,7 @@ class TimelineController(
     }
 
     private fun seekPlayerSafely(v: Long) {
-        try { player.seekTo(v); pendingSeekMs = -1 } catch (e: Exception) {
+        try { player.seekTo(v); pendingSeekMs = -1; seekInFlight = true; lastSeekAt = SystemClock.uptimeMillis() } catch (e: Exception) {
             Log.w(TAG, "seekTo отложен: плеер не готов", e)
             pendingSeekMs = v
         }
@@ -393,8 +418,22 @@ class TimelineController(
 
     override fun onIsPlayingChanged(isPlaying: Boolean) { _playing.value = isPlaying }
 
+    override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+        if (reason == Player.DISCONTINUITY_REASON_SEEK || reason == Player.DISCONTINUITY_REASON_SEEK_ADJUSTMENT) seekInFlight = false
+    }
+
     override fun onPlaybackStateChanged(playbackState: Int) {
         _buffering.value = playbackState == Player.STATE_BUFFERING
+        if (playbackState == Player.STATE_READY) seekInFlight = false
+        // сторожок: если буферизация затянулась (декодер завис), перемещаем плеер в ту же позицию и переподключаем поверхность
+        bufferingJob?.cancel()
+        if (playbackState == Player.STATE_BUFFERING) bufferingJob = scope.launch {
+            delay(BUFFERING_WATCHDOG_MS)
+            if (player.playbackState == Player.STATE_BUFFERING) {
+                Log.w(TAG, "буферизация затянулась — сброс декодера")
+                refreshVideoSurface(); delay(SURFACE_REBIND_MS); seekPlayerSafely(player.currentPosition)
+            }
+        }
         when (playbackState) {
             Player.STATE_IDLE -> playerReady = false
             Player.STATE_READY, Player.STATE_ENDED -> {
@@ -434,6 +473,9 @@ class TimelineController(
         const val PREVIEW_PAD_MS = 400L
         const val FRAME_REFRESH_MS = 120L
         const val SCRUB_MS = 33L
+        const val SEEK_INFLIGHT_MAX_MS = 250L
+        const val SURFACE_REBIND_MS = 70L
+        const val BUFFERING_WATCHDOG_MS = 4000L
         const val AUDIO_ROW = 1
         val CODEC_ERRORS = setOf(
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
