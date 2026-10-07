@@ -73,6 +73,9 @@ interface TimelineActions {
 /** Клип во время жеста: [baked] — положение, уже «запечённое» в показанной композиции; [current] — новое. */
 data class LiveClip(val id: Long, val baked: ClipTransform, val current: ClipTransform)
 
+/** Инструменты панели «Изменить» с отдельной панелью. */
+enum class MediaTool { SPEED, VOLUME, CHROMA, BG }
+
 /** Раздел нижней панели текста. */
 enum class TextSub { FONTS, STYLES, ANIMATION, COLOR }
 
@@ -374,7 +377,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
             val r = android.media.MediaMetadataRetriever()
             try {
                 r.setDataSource(ctx, uri)
-                r.getScaledFrameAtTime((c.srcInMs + localMs) * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 1280, 1280)
+                com.base.editor.media.MediaFrames.scaledFrame(r, (c.srcInMs + localMs) * 1000, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 1280)
             } finally { r.release() }
         } else {
             android.graphics.ImageDecoder.decodeBitmap(android.graphics.ImageDecoder.createSource(ctx.contentResolver, uri)) { dec, info, _ ->
@@ -384,6 +387,75 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
             }
         }
     }
+
+    // ───────── инструменты «Изменить»: скорость, громкость, хромакей, удаление фона ─────────
+    val mediaTool = MutableStateFlow<MediaTool?>(null)
+    val colorPickOpen = MutableStateFlow(false)
+    val bgJob = MutableStateFlow<BgJobState?>(null)
+    private var bgCoroutine: kotlinx.coroutines.Job? = null
+    private val maskStore = com.base.editor.media.MaskStore(app)
+    private val bgRemover = com.base.editor.media.BgRemover(app, maskStore)
+
+    val selectedClip get() = selectedId.value?.let { id -> clips.value.firstOrNull { it.id == id } }
+
+    fun openMediaTool(t: MediaTool) {
+        val c = selectedClip ?: return
+        if (c.type == com.base.editor.core.MediaType.IMAGE && (t == MediaTool.SPEED || t == MediaTool.VOLUME)) { events.value = "Для фото это недоступно"; return }
+        if (c.type == com.base.editor.core.MediaType.AUDIO && (t == MediaTool.CHROMA || t == MediaTool.BG)) { events.value = "Для звука это недоступно"; return }
+        controller.pause(); mediaTool.value = t
+    }
+    fun closeMediaTool() { controller.commitFxEdit(); mediaTool.value = null; colorPickOpen.value = false }
+
+    fun setClipSpeed(v: Float) { selectedId.value?.let { controller.setSpeed(it, v) } }
+    fun setClipVolume(v: Float) { selectedId.value?.let { controller.setVolume(it, v) } }
+
+    fun chromaOfSelected() = selectedId.value?.let { controller.state.value.chromas[it] }
+    fun toggleChroma(on: Boolean) { selectedId.value?.let { controller.setChroma(it, if (on) com.base.editor.core.ChromaKey() else null, rebuild = true) } }
+    fun updateChroma(f: (com.base.editor.core.ChromaKey) -> com.base.editor.core.ChromaKey) {
+        val id = selectedId.value ?: return
+        val cur = controller.state.value.chromas[id] ?: return
+        controller.setChroma(id, f(cur), rebuild = false)
+    }
+    fun commitFx() = controller.commitFxEdit()
+
+    // пипетка: кадр показываем без обрезки/эффектов, цвет берём по касанию
+    val pickFrame = MutableStateFlow<androidx.compose.ui.graphics.ImageBitmap?>(null)
+    fun openColorPicker() {
+        val clip = selectedClip ?: return
+        pickFrame.value = null; colorPickOpen.value = true
+        val local = (playheadMs.value - clip.startMs).coerceIn(0L, (clip.endMs - clip.startMs).coerceAtLeast(0L))
+        viewModelScope.launch(Dispatchers.IO) { pickFrame.value = runCatching { loadFrame(clip, (local * clip.speed).toLong()) }.getOrNull()?.asImageBitmap() }
+    }
+    fun pickChromaColor(argb: Int) { updateChroma { it.copy(color = argb or (0xFF shl 24)) }; commitFx(); colorPickOpen.value = false }
+    fun cancelColorPicker() { colorPickOpen.value = false }
+
+    fun bgMaskReady() = selectedClip?.let { maskStore.has(it.uri) } == true
+    fun bgOfSelected() = selectedId.value?.let { controller.state.value.bgs[it] }
+
+    /** Удаление фона: сегментация идёт в фоне (прогресс в панели), интерфейс не блокируется. */
+    fun startBg(recompute: Boolean) {
+        val clip = selectedClip ?: return
+        if (bgJob.value != null) return
+        if (!recompute && maskStore.has(clip.uri)) { controller.setBg(clip.id, com.base.editor.core.BgRemoval(), rebuild = true); return }
+        bgJob.value = BgJobState(clip.id, 0f)
+        bgCoroutine = viewModelScope.launch {
+            try {
+                if (recompute) maskStore.delete(clip.uri)
+                bgRemover.process(clip) { p -> bgJob.value = BgJobState(clip.id, p) }
+                controller.setBg(clip.id, controller.state.value.bgs[clip.id] ?: com.base.editor.core.BgRemoval(), rebuild = true)
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: com.base.editor.media.BgRemover.Failure) { events.value = e.message
+            } catch (e: Exception) { android.util.Log.e("BaseBg", "удаление фона", e); events.value = "Не удалось удалить фон на этом устройстве"
+            } finally { bgJob.value = null }
+        }
+    }
+    fun cancelBg() { bgCoroutine?.cancel(); bgJob.value = null }
+    fun updateBg(f: (com.base.editor.core.BgRemoval) -> com.base.editor.core.BgRemoval) {
+        val id = selectedId.value ?: return
+        val cur = controller.state.value.bgs[id] ?: return
+        controller.setBg(id, f(cur), rebuild = false)
+    }
+    fun disableBg() { selectedId.value?.let { controller.setBg(it, null, rebuild = true) } }
 
     // ───────── жесты на холсте ─────────
     /** Реальные пропорции исходников (по uri); рамка выделения должна совпадать с вписанным кадром. */

@@ -1,6 +1,8 @@
 package com.base.editor.domain
 
 import com.base.editor.core.Clip
+import com.base.editor.core.BgRemoval
+import com.base.editor.core.ChromaKey
 import com.base.editor.core.ClipTransform
 import com.base.editor.core.CropRect
 import com.base.editor.core.Keyframe
@@ -16,6 +18,8 @@ data class TimelineState(
     val transforms: Map<Long, ClipTransform> = emptyMap(),
     val keyframes: Map<Long, List<Keyframe>> = emptyMap(),
     val crops: Map<Long, CropRect> = emptyMap(),
+    val chromas: Map<Long, ChromaKey> = emptyMap(),
+    val bgs: Map<Long, BgRemoval> = emptyMap(),
 ) {
     fun cropOf(clipId: Long) = crops[clipId] ?: CropRect()
     fun transformOf(clipId: Long) = transforms[clipId] ?: ClipTransform()
@@ -39,13 +43,15 @@ class TimelineModel {
     private var transforms = mutableMapOf<Long, ClipTransform>()
     private var keyframes = mutableMapOf<Long, List<Keyframe>>()
     private var crops = mutableMapOf<Long, CropRect>()
+    private var chromas = mutableMapOf<Long, ChromaKey>()
+    private var bgs = mutableMapOf<Long, BgRemoval>()
     private var nextId = 1L
     private val undoStack = ArrayDeque<TimelineState>()
     private val redoStack = ArrayDeque<TimelineState>()
     /** Состояние на начало текущего жеста (его позиции — точка отсчёта для move/trim, пока палец не отпущен). */
     private var gestureBase: TimelineState? = null
 
-    fun state() = TimelineState(clips.toList(), transitions.toList(), transforms.toMap(), keyframes.toMap(), crops.toMap())
+    fun state() = TimelineState(clips.toList(), transitions.toList(), transforms.toMap(), keyframes.toMap(), crops.toMap(), chromas.toMap(), bgs.toMap())
     val totalMs get() = state().totalMs
     val canUndo get() = undoStack.isNotEmpty()
     val canRedo get() = redoStack.isNotEmpty()
@@ -104,10 +110,10 @@ class TimelineModel {
         val prevEnd = clips.filter { it.row == c.row && it.id != id && it.endMs <= c.startMs }.maxOfOrNull { it.endMs } ?: 0L
         val bounded = c.srcDurMs > 0
         var lo = prevEnd
-        if (bounded) lo = max(lo, c.startMs - c.srcInMs)
+        if (bounded) lo = max(lo, c.startMs - (c.srcInMs / c.speed).toLong())
         val hi = c.endMs - MIN_CLIP_MS
         val v = newStartMs.coerceIn(lo, max(lo, hi))
-        replace(c.copy(startMs = v, srcInMs = if (bounded) c.srcInMs + (v - c.startMs) else c.srcInMs))
+        replace(c.copy(startMs = v, srcInMs = if (bounded) c.srcInMs + ((v - c.startMs) * c.speed).toLong() else c.srcInMs))
         sanitize()
         return true
     }
@@ -117,7 +123,7 @@ class TimelineModel {
         if (c.row == 0) return trimMainEnd(c, newEndMs)
         val nextStart = clips.filter { it.row == c.row && it.id != id && it.startMs >= c.endMs }.minOfOrNull { it.startMs } ?: INF
         var hi = nextStart
-        if (c.srcDurMs > 0) hi = min(hi, c.startMs + (c.srcDurMs - c.srcInMs))
+        if (c.srcDurMs > 0) hi = min(hi, c.startMs + ((c.srcDurMs - c.srcInMs) / c.speed).toLong())
         val lo = c.startMs + MIN_CLIP_MS
         replace(c.copy(endMs = newEndMs.coerceIn(lo, max(lo, hi))))
         sanitize()
@@ -130,12 +136,14 @@ class TimelineModel {
         if (atMs < c.startMs + MIN_CLIP_MS || atMs > c.endMs - MIN_CLIP_MS) return -1
         val right = c.copy(
             id = nextId++, startMs = atMs,
-            srcInMs = if (c.srcDurMs > 0) c.srcInMs + (atMs - c.startMs) else c.srcInMs,
+            srcInMs = if (c.srcDurMs > 0) c.srcInMs + ((atMs - c.startMs) * c.speed).toLong() else c.srcInMs,
         )
         replace(c.copy(endMs = atMs))
         clips += right
         transforms[c.id]?.let { transforms[right.id] = it }
         crops[c.id]?.let { crops[right.id] = it }
+        chromas[c.id]?.let { chromas[right.id] = it }
+        bgs[c.id]?.let { bgs[right.id] = it }
         // ключи делятся между половинами: левые остаются, правые сдвигаются к началу правой половины
         keyframes[c.id]?.let { keys ->
             val cut = atMs - c.startMs
@@ -165,10 +173,10 @@ class TimelineModel {
     private fun trimMainStart(current: Clip, newStartMs: Long): Boolean {
         val base = baseClip(current.id)?.takeIf { it.row == 0 } ?: current
         val bounded = base.srcDurMs > 0
-        val lo = if (bounded) -base.srcInMs else -MAX_EXTEND_MS
+        val lo = if (bounded) -(base.srcInMs / base.speed).toLong() else -MAX_EXTEND_MS
         val hi = base.lengthMs - MIN_CLIP_MS
         val delta = (newStartMs - base.startMs).coerceIn(lo, max(lo, hi))
-        replace(base.copy(srcInMs = if (bounded) base.srcInMs + delta else base.srcInMs, endMs = base.endMs - delta))
+        replace(base.copy(srcInMs = if (bounded) base.srcInMs + (delta * base.speed).toLong() else base.srcInMs, endMs = base.endMs - delta))
         sanitize()
         return true
     }
@@ -176,7 +184,7 @@ class TimelineModel {
     /** Подрезка справа: меняется длина, следующие клипы смещаются так, чтобы пустот не было. */
     private fun trimMainEnd(current: Clip, newEndMs: Long): Boolean {
         val base = baseClip(current.id)?.takeIf { it.row == 0 } ?: current
-        val room = if (base.srcDurMs > 0) base.srcDurMs - base.srcInMs else MAX_EXTEND_MS
+        val room = if (base.srcDurMs > 0) ((base.srcDurMs - base.srcInMs) / base.speed).toLong() else MAX_EXTEND_MS
         val len = (newEndMs - base.startMs).coerceIn(MIN_CLIP_MS, max(MIN_CLIP_MS, room))
         replace(base.copy(endMs = base.startMs + len))
         sanitize()
@@ -235,6 +243,31 @@ class TimelineModel {
         if (v.isIdentity) transforms.remove(clipId) else transforms[clipId] = v
         return true
     }
+
+    // ───────── скорость, громкость, хромакей, удаление фона ─────────
+    /** Меняет скорость клипа: длина на таймлайне пересчитывается (исходный отрезок тот же), ключи масштабируются. */
+    fun setSpeed(id: Long, speed: Float): Boolean {
+        val c = find(id) ?: return false
+        if (c.type == MediaType.IMAGE) return false
+        val s = speed.coerceIn(MIN_SPEED, MAX_SPEED)
+        if (kotlin.math.abs(s - c.speed) < 1e-4f) return false
+        val newLen = max(MIN_CLIP_MS, (c.lengthMs * c.speed / s).toLong())
+        replace(c.copy(speed = s, endMs = c.startMs + newLen))
+        keyframes[id]?.let { keys -> keyframes[id] = keys.map { it.copy(timeMs = (it.timeMs * c.speed / s).toLong()) } }
+        if (c.row == 0) compactMain()
+        sanitize()
+        return true
+    }
+
+    fun setVolume(id: Long, volume: Float): Boolean {
+        val c = find(id) ?: return false
+        val v = volume.coerceIn(0f, 2f)
+        if (kotlin.math.abs(v - c.volume) < 1e-4f) return false
+        replace(c.copy(volume = v)); return true
+    }
+
+    fun setChroma(id: Long, k: ChromaKey?): Boolean { if (find(id) == null) return false; if (k == null) chromas.remove(id) else chromas[id] = k; return true }
+    fun setBg(id: Long, b: BgRemoval?): Boolean { if (find(id) == null) return false; if (b == null) bgs.remove(id) else bgs[id] = b; return true }
 
     // ───────── кадрирование ─────────
     /** null или полный прямоугольник — снять кадрирование. */
@@ -303,6 +336,9 @@ class TimelineModel {
         }
         transitions.forEach { t -> append("T\t${t.leftId}\t${t.rightId}\t${t.shaderId}\t${t.durationMs}\n") }
         transforms.forEach { (id, t) -> append("X\t$id\t${t.x}\t${t.y}\t${t.scale}\t${t.rotationDeg}\n") }
+        clips.forEach { c -> if (c.speed != 1f || c.volume != 1f) append("S\t${c.id}\t${c.speed}\t${c.volume}\n") }
+        chromas.forEach { (id, k) -> append("H\t$id\t${k.color}\t${k.similarity}\t${k.smoothness}\t${k.bgColor}\n") }
+        bgs.forEach { (id, b) -> append("B\t$id\t${b.mode.name}\t${b.bgColor}\t${b.blur}\t${if (b.outline) 1 else 0}\t${b.outlineColor}\t${b.outlineWidth}\n") }
         crops.forEach { (id, r) -> append("C\t$id\t${r.left}\t${r.top}\t${r.right}\t${r.bottom}\n") }
         keyframes.forEach { (id, keys) -> keys.forEach { k -> append("K\t$id\t${k.timeMs}\t${k.x}\t${k.y}\t${k.scale}\t${k.rotationDeg}\n") } }
     }
@@ -313,6 +349,9 @@ class TimelineModel {
         val newX = mutableMapOf<Long, ClipTransform>()
         val newK = mutableMapOf<Long, MutableList<Keyframe>>()
         val newC = mutableMapOf<Long, CropRect>()
+        val newH = mutableMapOf<Long, ChromaKey>()
+        val newB = mutableMapOf<Long, BgRemoval>()
+        val newS = mutableMapOf<Long, Pair<Float, Float>>()
         var next = 1L
         var header = false
         for (line in data.lineSequence()) {
@@ -333,6 +372,17 @@ class TimelineModel {
                     if (t.size >= 6) newX[t[1].toLong()] = ClipTransform(t[2].toFloat(), t[3].toFloat(), t[4].toFloat(), t[5].toFloat())
                     continue
                 }
+                if (f[0] == "S") {
+                    val t = line.split('\t'); if (t.size >= 4) newS[t[1].toLong()] = t[2].toFloat() to t[3].toFloat(); continue
+                }
+                if (f[0] == "H") {
+                    val t = line.split('\t'); if (t.size >= 6) newH[t[1].toLong()] = ChromaKey(t[2].toInt(), t[3].toFloat(), t[4].toFloat(), t[5].toInt()); continue
+                }
+                if (f[0] == "B") {
+                    val t = line.split('\t')
+                    if (t.size >= 8) newB[t[1].toLong()] = BgRemoval(runCatching { com.base.editor.core.BgMode.valueOf(t[2]) }.getOrDefault(com.base.editor.core.BgMode.COLOR), t[3].toInt(), t[4].toFloat(), t[5] == "1", t[6].toInt(), t[7].toFloat())
+                    continue
+                }
                 if (f[0] == "C") {
                     val t = line.split('\t')
                     if (t.size >= 6) newC[t[1].toLong()] = CropRect(t[2].toFloat(), t[3].toFloat(), t[4].toFloat(), t[5].toFloat()).sane()
@@ -349,7 +399,8 @@ class TimelineModel {
             } catch (_: NumberFormatException) { return false }
         }
         if (!header) return false
-        clips = newClips; transitions = newTr; transforms = newX; crops = newC
+        clips = newClips.map { c -> newS[c.id]?.let { (sp, vol) -> c.copy(speed = sp.coerceIn(MIN_SPEED, MAX_SPEED), volume = vol.coerceIn(0f, 2f)) } ?: c }.toMutableList()
+        transitions = newTr; transforms = newX; crops = newC; chromas = newH; bgs = newB
         keyframes = newK.mapValues { it.value.toList() }.toMutableMap(); nextId = next
         undoStack.clear(); redoStack.clear()
         sanitize()
@@ -361,7 +412,7 @@ class TimelineModel {
     private fun replace(c: Clip) { val i = clips.indexOfFirst { it.id == c.id }; if (i >= 0) clips[i] = c }
     private fun restore(s: TimelineState) {
         clips = s.clips.toMutableList(); transitions = s.transitions.toMutableList()
-        transforms = s.transforms.toMutableMap(); keyframes = s.keyframes.toMutableMap(); crops = s.crops.toMutableMap()
+        transforms = s.transforms.toMutableMap(); keyframes = s.keyframes.toMutableMap(); crops = s.crops.toMutableMap(); chromas = s.chromas.toMutableMap(); bgs = s.bgs.toMutableMap()
     }
 
     /** Убирает переходы, потерявшие стык, и зажимает длительность в [MIN_TRANSITION_MS, длина входящего клипа]. */
@@ -371,6 +422,8 @@ class TimelineModel {
         transforms.keys.retainAll(ids)
         keyframes.keys.retainAll(ids)
         crops.keys.retainAll(ids)
+        chromas.keys.retainAll(ids)
+        bgs.keys.retainAll(ids)
         // ключи за пределами (подрезанного) клипа прижимаются к его краям
         keyframes.replaceAll { id, keys ->
             val len = find(id)?.lengthMs ?: 0L
@@ -385,6 +438,8 @@ class TimelineModel {
     }
 
     companion object {
+        const val MIN_SPEED = 0.1f
+        const val MAX_SPEED = 10f
         const val MIN_CLIP_MS = 100L
         const val MIN_TRANSITION_MS = 200L
         private const val MAX_EXTEND_MS = 600_000L

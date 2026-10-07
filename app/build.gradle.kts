@@ -85,6 +85,8 @@ dependencies {
     implementation(libs.media3.transformer)
     implementation(libs.media3.effect)
     implementation(files(sherpaAar))
+    // MediaPipe Tasks Vision: сегментация силуэта для удаления фона (модель скачивается при первом использовании)
+    implementation("com.google.mediapipe:tasks-vision:0.10.21")
     implementation(libs.libpag)
 
     testImplementation(libs.junit)

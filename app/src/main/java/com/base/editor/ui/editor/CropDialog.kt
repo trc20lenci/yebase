@@ -68,7 +68,7 @@ fun CropDialog(frame: ImageBitmap?, initial: CropRect, onDone: (CropRect?) -> Un
                 Text("Сброс", color = Color.White.copy(alpha = .8f), fontSize = 15.sp,
                     modifier = Modifier.pressable { rect = CropRect(); preset = CropPreset.FREE }.clip(RoundedCornerShape(10.dp)).padding(10.dp))
                 Text("Готово", color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold,
-                    modifier = Modifier.pressable { onDone(rect.takeIf { !it.isFull }) }.clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).padding(horizontal = 16.dp, vertical = 10.dp))
+                    modifier = Modifier.pressable { onDone(rect.takeIf { !it.isFull }) }.clip(RoundedCornerShape(10.dp)).background(BaseColors.Primary).padding(horizontal = 16.dp, vertical = 10.dp))
             }
             Box(Modifier.weight(1f).fillMaxWidth().padding(vertical = 12.dp), contentAlignment = Alignment.Center) {
                 if (frame == null) Text("Загрузка кадра…", color = Color.White.copy(alpha = .6f))

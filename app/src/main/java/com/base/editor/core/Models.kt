@@ -15,8 +15,14 @@ data class Clip(
     val srcInMs: Long,
     val srcDurMs: Long,
     val uri: String,
+    /** Скорость воспроизведения (0.1…10×). Длина на таймлайне = длина исходного отрезка / speed. */
+    val speed: Float = 1f,
+    /** Громкость клипа: 0 — без звука, 1 — оригинал, 2 — усиление ×2 (+6 дБ). */
+    val volume: Float = 1f,
 ) {
     val lengthMs get() = endMs - startMs
+    /** Длина исходного отрезка, который занимает клип (мс исходника). */
+    val srcSpanMs get() = (lengthMs * speed).toLong()
 }
 
 /**
@@ -48,6 +54,20 @@ data class Keyframe(
     constructor(timeMs: Long, t: ClipTransform) : this(timeMs, t.x, t.y, t.scale, t.rotationDeg)
     fun transform() = ClipTransform(x, y, scale, rotationDeg)
 }
+
+/** Хромакей: цвет ключа (ARGB), порог схожести 0…1, сглаживание края 0…1, цвет, которым заливается убранное. */
+data class ChromaKey(
+    val color: Int = 0xFF00FF00.toInt(), val similarity: Float = 0.30f, val smoothness: Float = 0.10f,
+    val bgColor: Int = 0xFF000000.toInt(),
+)
+
+enum class BgMode { COLOR, BLUR }
+
+/** Удаление фона по маске сегментации: фон заливается цветом или размывается; опциональная обводка контура. */
+data class BgRemoval(
+    val mode: BgMode = BgMode.COLOR, val bgColor: Int = 0xFF000000.toInt(), val blur: Float = 0.6f,
+    val outline: Boolean = false, val outlineColor: Int = 0xFFFFFFFF.toInt(), val outlineWidth: Float = 0.5f,
+)
 
 /** Прямоугольник кадрирования в долях исходного кадра (0..1, начало слева сверху). */
 data class CropRect(val left: Float = 0f, val top: Float = 0f, val right: Float = 1f, val bottom: Float = 1f) {

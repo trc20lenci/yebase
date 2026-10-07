@@ -98,7 +98,7 @@ fun TextInputSheet(text: String, onChange: (String) -> Unit, onDone: () -> Unit)
                 value = text, onValueChange = onChange,
                 modifier = Modifier.weight(1f).focusRequester(focus), placeholder = { Text("Введите текст") }, minLines = 1, maxLines = 3,
             )
-            Text("Готово", Modifier.pressable(onClick = onDone).padding(start = 10.dp).clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan).padding(horizontal = 18.dp, vertical = 12.dp),
+            Text("Готово", Modifier.pressable(onClick = onDone).padding(start = 10.dp).clip(RoundedCornerShape(10.dp)).background(BaseColors.Primary).padding(horizontal = 18.dp, vertical = 12.dp),
                 color = Color.Black, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
     }
@@ -154,7 +154,7 @@ fun TextToolbar(
                         TextSub.COLOR -> {
                             items(TEXT_COLORS, key = { it }) { c ->
                                 Box(Modifier.pressable { onChange { it.copy(textColor = c) } }.size(34.dp).clip(CircleShape).background(Color(c))
-                                    .then(if (clip.textColor == c) Modifier.border(3.dp, BaseColors.Cyan, CircleShape) else Modifier.border(1.dp, Color.White.copy(alpha = .35f), CircleShape))
+                                    .then(if (clip.textColor == c) Modifier.border(3.dp, BaseColors.Primary, CircleShape) else Modifier.border(1.dp, Color.White.copy(alpha = .35f), CircleShape))
                                     )
                             }
                             item { Chip(clip.hasBackground, { onChange { it.copy(backgroundColor = if (clip.hasBackground) 0L else 0x99000000) } }) { Text("Плашка", fontSize = 13.sp, color = chipText(clip.hasBackground)) } }
@@ -203,7 +203,7 @@ private fun ColorChips(selected: Long, onPick: (Long) -> Unit) {
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(TextPalette) { c ->
             val sel = (c and 0xFFFFFF) == (selected and 0xFFFFFF)
-            Box(Modifier.pressable { onPick(c) }.size(36.dp).clip(CircleShape).background(Color(c)).border(BorderStroke(if (sel) 3.dp else 1.dp, if (sel) BaseColors.Cyan else Color.White.copy(alpha = .25f)), CircleShape))
+            Box(Modifier.pressable { onPick(c) }.size(36.dp).clip(CircleShape).background(Color(c)).border(BorderStroke(if (sel) 3.dp else 1.dp, if (sel) BaseColors.Primary else Color.White.copy(alpha = .25f)), CircleShape))
         }
     }
 }

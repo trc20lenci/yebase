@@ -71,7 +71,7 @@ private const val STAGGER_MAX_ITEMS = 10
 
 /** Цвет выбранного/невыбранного чипа с плавной сменой (STATE_MS, ease-out). */
 @Composable
-fun animatedSelectColor(on: Boolean, onColor: androidx.compose.ui.graphics.Color = BaseColors.Cyan, offColor: androidx.compose.ui.graphics.Color = BaseColors.DarkSlot): androidx.compose.ui.graphics.Color =
+fun animatedSelectColor(on: Boolean, onColor: androidx.compose.ui.graphics.Color = BaseColors.Primary, offColor: androidx.compose.ui.graphics.Color = BaseColors.DarkSlot): androidx.compose.ui.graphics.Color =
     androidx.compose.animation.animateColorAsState(if (on) onColor else offColor, tween(BaseMotion.STATE_MS, easing = BaseMotion.EaseOut), label = "chip").value
 
 /**

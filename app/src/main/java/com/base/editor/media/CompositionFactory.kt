@@ -24,6 +24,7 @@ import com.base.editor.domain.TimelineState
 import com.base.editor.media.gl.TailCaptureEffect
 import com.base.editor.media.gl.TransitionBridge
 import com.base.editor.media.gl.TransitionEffect
+import kotlin.math.abs
 import kotlin.math.max
 
 /** Параметры сборки одной композиции. */
@@ -46,6 +47,8 @@ data class CompositionRequest(
     val liveTransforms: ((Long, Long) -> com.base.editor.core.ClipTransform)? = null,
     /** Экспорт: целевой FPS (24/30/60). null — превью (30). */
     val fps: Int? = null,
+    /** Превью: живые параметры хромакея/удаления фона по clipId (слайдеры работают без пересборки). null — снимок [state]. */
+    val liveFx: ((Long) -> com.base.editor.media.gl.FxParams)? = null,
 )
 
 /**
@@ -82,6 +85,13 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
             if (clip.startMs > cursorMs) seq.addGap((clip.startMs - cursorMs) * 1000)
 
             val effects = mutableListOf<Effect>()
+            // хромакей / удаление фона — до кадрирования: маска посчитана по полному исходному кадру
+            if (!req.safeMode && (req.state.chromas.containsKey(clip.id) || req.state.bgs.containsKey(clip.id))) {
+                val id = clip.id
+                val maskReader = if (req.state.bgs.containsKey(id)) com.base.editor.media.MaskStore(context).reader(clip.uri) else null
+                val provider = req.liveFx ?: { _ -> com.base.editor.media.gl.FxParams(req.state.chromas[id], req.state.bgs[id]) }
+                effects += com.base.editor.media.gl.ClipFxEffect({ provider(id) }, maskReader, clip.startMs, clip.srcInMs, clip.speed)
+            }
             // кадрирование — первым, до вписывания в холст; Crop принимает границы в NDC (−1..1, Y вверх)
             req.state.crops[clip.id]?.takeIf { !it.isFull }?.let { c ->
                 effects += Crop(-1f + 2f * c.left, -1f + 2f * c.right, 1f - 2f * c.bottom, 1f - 2f * c.top)
@@ -175,21 +185,38 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
             item.setImageDurationMs(c.lengthMs)
             edited = EditedMediaItem.Builder(item.build()).setDurationUs(c.lengthMs * 1000).setFrameRate(fps)
         } else {
+            // отрезок ИСХОДНИКА = длина на таймлайне × скорость (при 2× клип в 10 с занимает 20 с исходника)
+            val srcSpan = c.srcSpanMs
             item.setClippingConfiguration(
                 MediaItem.ClippingConfiguration.Builder()
                     .setStartPositionMs(c.srcInMs)
-                    .setEndPositionMs(c.srcInMs + c.lengthMs)
+                    .setEndPositionMs(c.srcInMs + srcSpan)
                     .build(),
             )
             // CompositionPlayer не читает длительность из файла: ему нужна ПОЛНАЯ длительность исходника
             // заранее (из неё он сам вычитает обрезку). Без этого — IllegalStateException в setComposition.
-            val sourceMs = max(c.srcDurMs, c.srcInMs + c.lengthMs)
+            val sourceMs = max(c.srcDurMs, c.srcInMs + srcSpan)
             edited = EditedMediaItem.Builder(item.build()).setDurationUs(sourceMs * 1000).setFrameRate(fps)
+            // скорость: SpeedProvider меняет темп и видео, и звука; звук растягивается с сохранением тона (Sonic)
+            if (abs(c.speed - 1f) > 1e-3f) edited.setSpeed(ConstantSpeed(c.speed))
         }
-        return edited.setEffects(Effects(emptyList(), videoEffects))
+        // громкость: 0 — тишина, 1 — оригинал, 2 — усиление ×2 (+6 дБ)
+        val audioFx: List<androidx.media3.common.audio.AudioProcessor> =
+            if (abs(c.volume - 1f) > 1e-3f) listOf(volumeProcessor(c.volume)) else emptyList()
+        return edited.setEffects(Effects(audioFx, videoEffects))
             .setRemoveAudio(removeAudio)
             .setRemoveVideo(c.type == MediaType.AUDIO)      // музыка идёт отдельной звуковой последовательностью
             .build()
+    }
+
+    private fun volumeProcessor(v: Float) = androidx.media3.common.audio.ChannelMixingAudioProcessor().apply {
+        putChannelMixingMatrix(androidx.media3.common.audio.ChannelMixingMatrix.create(1, 1).scaleBy(v))
+        putChannelMixingMatrix(androidx.media3.common.audio.ChannelMixingMatrix.create(2, 2).scaleBy(v))
+    }
+
+    private class ConstantSpeed(private val speed: Float) : androidx.media3.common.audio.SpeedProvider {
+        override fun getSpeed(timeUs: Long) = speed
+        override fun getNextSpeedChangeTimeUs(timeUs: Long) = androidx.media3.common.C.TIME_UNSET
     }
 
     companion object {

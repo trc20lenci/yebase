@@ -75,20 +75,20 @@ fun HomeScreen(
     val ctx = LocalContext.current
     Column(
         Modifier.fillMaxSize()
-            .background(Brush.verticalGradient(0f to BaseColors.SkyTop, 0.45f to Color.White))
+            .background(Brush.verticalGradient(0f to BaseColors.DarkPanel, 0.45f to BaseColors.DarkBg))
             .statusBarsPadding().verticalScroll(rememberScrollState()),
     ) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 20.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Image(painterResource(R.drawable.logo_base_black), "BASE", Modifier.height(28.dp))
             Spacer(Modifier.weight(1f))
             Box(
-                Modifier.pressable(onClick = onSeeAll).size(44.dp).clip(RoundedCornerShape(22.dp)).background(Color.White.copy(alpha = .7f)),
+                Modifier.pressable(onClick = onSeeAll).size(44.dp).clip(RoundedCornerShape(22.dp)).background(BaseColors.DarkSlot),
                 contentAlignment = Alignment.Center,
-            ) { Icon(Icons.Rounded.Search, "Поиск", tint = BaseColors.Ink) }
+            ) { Icon(Icons.Rounded.Search, "Поиск", tint = BaseColors.OnBg) }
         }
         Spacer(Modifier.height(36.dp))
-        Text("Редактирование видео", Modifier.padding(horizontal = 20.dp), color = BaseColors.Ink.copy(alpha = .6f), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
-        Text("Начать работу", Modifier.padding(horizontal = 20.dp, vertical = 4.dp), color = BaseColors.Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+        Text("Редактирование видео", Modifier.padding(horizontal = 20.dp), color = BaseColors.OnBg.copy(alpha = .6f), fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+        Text("Начать работу", Modifier.padding(horizontal = 20.dp, vertical = 4.dp), color = BaseColors.OnBg, fontSize = 30.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(12.dp))
         Row(Modifier.padding(horizontal = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             BigAction("Новое видео", Icons.Rounded.Add, Modifier.weight(1.3f), onNewVideo)
@@ -117,9 +117,9 @@ fun HomeScreen(
             Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp)) {
                 rowTools.forEach { t ->
                     Column(Modifier.pressable { soon(ctx) }.weight(1f).clip(RoundedCornerShape(12.dp)).padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                        Icon(t.icon, null, Modifier.size(30.dp), tint = BaseColors.Ink.copy(alpha = .8f))
+                        Icon(t.icon, null, Modifier.size(30.dp), tint = BaseColors.OnBg.copy(alpha = .8f))
                         Spacer(Modifier.height(8.dp))
-                        Text(t.label, fontSize = 13.sp, color = BaseColors.Ink.copy(alpha = .75f), textAlign = TextAlign.Center, minLines = 2, maxLines = 2)
+                        Text(t.label, fontSize = 13.sp, color = BaseColors.OnBg.copy(alpha = .75f), textAlign = TextAlign.Center, minLines = 2, maxLines = 2)
                     }
                 }
             }
@@ -131,13 +131,13 @@ fun HomeScreen(
 @Composable
 private fun BigAction(label: String, icon: ImageVector, modifier: Modifier, onClick: () -> Unit) {
     Column(
-        modifier.pressable(onClick = onClick).height(120.dp).clip(RoundedCornerShape(22.dp)).background(Color.White).padding(12.dp),
+        modifier.pressable(onClick = onClick).height(120.dp).clip(RoundedCornerShape(22.dp)).background(BaseColors.DarkPanel).padding(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
-        Box(Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(BaseColors.Ink), contentAlignment = Alignment.Center) {
-            Icon(icon, null, tint = Color.White)
+        Box(Modifier.size(38.dp).clip(RoundedCornerShape(11.dp)).background(BaseColors.Primary), contentAlignment = Alignment.Center) {
+            Icon(icon, null, tint = Color.Black)
         }
         Spacer(Modifier.height(10.dp))
-        Text(label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, color = BaseColors.Ink)
+        Text(label, fontSize = 17.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, color = BaseColors.OnBg)
     }
 }

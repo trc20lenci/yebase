@@ -44,18 +44,18 @@ fun MainScreen(onNewVideo: () -> Unit, onEditPhoto: () -> Unit, onOpenProject: (
     val projects by vm.projects.collectAsStateWithLifecycle()
 
     Scaffold(
-        containerColor = Color.White,
+        containerColor = BaseColors.DarkBg,
         bottomBar = {
-            NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
+            NavigationBar(containerColor = BaseColors.DarkPanel, tonalElevation = 0.dp) {
                 Tab.entries.forEachIndexed { i, t ->
                     NavigationBarItem(
                         selected = tab == i, onClick = { tab = i },
                         icon = { Icon(t.icon, t.label) },
                         label = { Text(t.label, fontSize = 12.sp) },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = BaseColors.Ink, selectedTextColor = BaseColors.Ink,
+                            selectedIconColor = BaseColors.Primary, selectedTextColor = BaseColors.Primary,
                             unselectedIconColor = BaseColors.Muted, unselectedTextColor = BaseColors.Muted,
-                            indicatorColor = Color.Transparent,
+                            indicatorColor = BaseColors.Primary.copy(alpha = .16f),
                         ),
                     )
                 }

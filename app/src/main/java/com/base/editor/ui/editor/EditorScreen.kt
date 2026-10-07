@@ -5,6 +5,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import com.base.editor.ui.theme.BaseMotion
 import androidx.compose.foundation.Image
+import androidx.compose.material.icons.rounded.Colorize
+import androidx.compose.material.icons.rounded.AutoFixHigh
+import androidx.compose.material.icons.rounded.Speed
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.border
@@ -144,6 +150,9 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     val textInput by vm.textInputOpen.collectAsStateWithLifecycle()
     val captionInput by vm.captionInputOpen.collectAsStateWithLifecycle()
     val exportSheet by vm.exportSheetOpen.collectAsStateWithLifecycle()
+    val mediaTool by vm.mediaTool.collectAsStateWithLifecycle()
+    val bgJob by vm.bgJob.collectAsStateWithLifecycle()
+    val colorPick by vm.colorPickOpen.collectAsStateWithLifecycle()
     val pagTemplates by vm.pagTemplates.collectAsStateWithLifecycle()
 
     SideEffect { vm.onRequestAddMedia = onAddMedia }
@@ -163,6 +172,8 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
             fullscreen -> fullscreen = false
             exportSheet -> vm.closeExportSheet()
             textSub != null -> vm.setTextSub(null)
+            colorPick -> vm.cancelColorPicker()
+            mediaTool != null -> vm.closeMediaTool()
             formatPanel -> vm.closeFormat()
             captionPanel -> vm.closeCaptions()
             transitionFor != null -> vm.closeTransitions()
@@ -179,6 +190,10 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
         onDismiss = vm::closeExportSheet,
         onStart = { res, fps -> vm.setResolution(res); vm.setExportFps(fps); vm.closeExportSheet(); vm.startExport() },
     )
+    if (colorPick) {
+        val pf by vm.pickFrame.collectAsStateWithLifecycle()
+        ColorPickDialog(pf, onPick = vm::pickChromaColor, onCancel = vm::cancelColorPicker)
+    }
     val cropId by vm.cropClipId.collectAsStateWithLifecycle()
     if (cropId != null) {
         val frame by vm.cropFrame.collectAsStateWithLifecycle()
@@ -193,7 +208,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
             Spacer(Modifier.width(8.dp))
             Image(painterResource(R.drawable.logo_base_white), "BASE", Modifier.height(20.dp))
             Spacer(Modifier.weight(1f))
-            Text("Экспорт", Modifier.pressable(onClick = vm::openExportSheet).clip(RoundedCornerShape(12.dp)).background(BaseColors.Cyan).padding(horizontal = 18.dp, vertical = 10.dp),
+            Text("Экспорт", Modifier.pressable(onClick = vm::openExportSheet).clip(RoundedCornerShape(12.dp)).background(BaseColors.Primary).padding(horizontal = 18.dp, vertical = 10.dp),
                 color = Color.Black, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, maxLines = 1)
         } }
 
@@ -207,7 +222,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
 
             // Нижняя область ФИКСИРОВАННОЙ высоты: таймлайн + панель инструментов. Таймлайн живой в любом режиме
             // редактирования (клип, аудио, текст, субтитры): мотать проект и двигать курсор можно всегда.
-            val panelOpen = captionPanel || transitionFor != null || formatPanel
+            val panelOpen = captionPanel || transitionFor != null || formatPanel || mediaTool != null
             Box(Modifier.fillMaxWidth().height((TL_HEIGHT_DP + TOOLBAR_HEIGHT_DP).dp).background(BaseColors.DarkBg)) {
                 Column(Modifier.fillMaxSize()) {
                     TimelineHost(vm, clips, transitions, captionItems, texts, keyframes, selected, selText, selCaption)
@@ -228,9 +243,13 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                                 ToolButton(Icons.Rounded.AspectRatio, "Формат", onClick = vm::openFormat)
                                 ToolButton(Icons.Rounded.Layers, "Наложение") { soon(ctx) }
                             }
-                            ToolMode.MEDIA -> ToolRow {
+                            ToolMode.MEDIA -> ScrollToolRow {
                                 ToolButton(Icons.Rounded.ChevronLeft, "Назад") { vm.select(null) }
                                 ToolButton(Icons.Rounded.VerticalSplit, "Разделить", onClick = vm::split)
+                                ToolButton(Icons.Rounded.Speed, "Скорость") { vm.openMediaTool(MediaTool.SPEED) }
+                                ToolButton(Icons.Rounded.VolumeUp, "Громкость") { vm.openMediaTool(MediaTool.VOLUME) }
+                                ToolButton(Icons.Rounded.AutoFixHigh, "Фон") { vm.openMediaTool(MediaTool.BG) }
+                                ToolButton(Icons.Rounded.Colorize, "Хромакей") { vm.openMediaTool(MediaTool.CHROMA) }
                                 ToolButton(Icons.Rounded.Crop, "Кадрирование", onClick = vm::openCrop)
                                 ToolButton(Icons.Rounded.Animation, "Анимации") { soon(ctx) }
                                 ToolButton(Icons.Rounded.DeleteOutline, "Удалить", onClick = vm::deleteSelected)
@@ -238,6 +257,8 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                             ToolMode.AUDIO -> ToolRow {
                                 ToolButton(Icons.Rounded.ChevronLeft, "Назад") { vm.select(null) }
                                 ToolButton(Icons.Rounded.VerticalSplit, "Разделить", onClick = vm::split)
+                                ToolButton(Icons.Rounded.Speed, "Скорость") { vm.openMediaTool(MediaTool.SPEED) }
+                                ToolButton(Icons.Rounded.VolumeUp, "Громкость") { vm.openMediaTool(MediaTool.VOLUME) }
                                 ToolButton(Icons.Rounded.DeleteOutline, "Удалить", onClick = vm::deleteSelected)
                             }
                             ToolMode.TEXT -> texts.firstOrNull { it.id == selText }?.let { t ->
@@ -276,6 +297,29 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                         onAdd = vm::addCaptionHere, onClearAll = vm.captions::clearAll,
                         onPreset = vm.captions::applyPreset, onStyle = vm.captions::updateStyle, onClose = vm::closeCaptions,
                     )
+                }
+                val toolClip = clips.firstOrNull { it.id == selected }
+                BottomPanel(visible = mediaTool != null && toolClip != null) {
+                    if (toolClip != null) when (mediaTool) {
+                        MediaTool.SPEED -> SpeedPanel(toolClip.speed, onCommit = vm::setClipSpeed, onClose = vm::closeMediaTool)
+                        MediaTool.VOLUME -> VolumePanel(toolClip.volume, onChange = vm::setClipVolume, onClose = vm::closeMediaTool)
+                        MediaTool.CHROMA -> {
+                            val ck by vm.controller.state.collectAsStateWithLifecycle()
+                            ChromaPanel(
+                                key = ck.chromas[toolClip.id], onToggle = vm::toggleChroma, onChange = vm::updateChroma, onDone = vm::commitFx,
+                                onPickColor = vm::openColorPicker, onClose = vm::closeMediaTool,
+                            )
+                        }
+                        MediaTool.BG -> {
+                            val st by vm.controller.state.collectAsStateWithLifecycle()
+                            BgPanel(
+                                hasMask = vm.bgMaskReady(), bg = st.bgs[toolClip.id], job = bgJob?.takeIf { it.clipId == toolClip.id },
+                                onStart = vm::startBg, onCancel = vm::cancelBg, onChange = vm::updateBg, onDone = vm::commitFx,
+                                onDisable = vm::disableBg, onClose = vm::closeMediaTool,
+                            )
+                        }
+                        null -> Unit
+                    }
                 }
                 val curFormat by vm.format.collectAsStateWithLifecycle()
                 BottomPanel(visible = formatPanel) { FormatPanel(curFormat, vm::setFormat, vm::closeFormat) }
@@ -487,6 +531,12 @@ private fun ToolRow(content: @Composable RowScope.() -> Unit) {
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.SpaceEvenly, verticalAlignment = Alignment.CenterVertically, content = content)
 }
 
+/** Ряд кнопок с горизонтальной прокруткой — для панелей, где инструментов больше, чем помещается в экран. */
+@Composable
+private fun ScrollToolRow(content: @Composable RowScope.() -> Unit) {
+    Row(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+}
+
 @Composable
 private fun RoundIcon(icon: ImageVector, desc: String, onClick: () -> Unit, size: androidx.compose.ui.unit.Dp = 44.dp, enabled: Boolean = true) {
     val a by androidx.compose.animation.core.animateFloatAsState(if (enabled) 1f else .35f, androidx.compose.animation.core.tween(BaseMotion.STATE_MS, easing = BaseMotion.EaseOut), label = "iconAlpha")
@@ -512,7 +562,7 @@ private fun KeyframeButton(hasKey: Boolean, onClick: () -> Unit) {
             val diamond = androidx.compose.ui.graphics.Path().apply {
                 moveTo(cx, cy - r); lineTo(cx + r, cy); lineTo(cx, cy + r); lineTo(cx - r, cy); close()
             }
-            drawPath(diamond, if (hasKey) BaseColors.Cyan else Color.White)
+            drawPath(diamond, if (hasKey) BaseColors.Primary else Color.White)
             // плюс или минус внутри ромбика
             val ink = Color(0xFF111318)
             val lw = w * 0.075f; val arm = r * 0.48f
@@ -525,7 +575,7 @@ private fun KeyframeButton(hasKey: Boolean, onClick: () -> Unit) {
 @Composable
 private fun RowScope.ToolButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Column(
-        Modifier.pressable(onClick = onClick).weight(1f).fillMaxHeight().clip(RoundedCornerShape(12.dp)),
+        Modifier.pressable(onClick = onClick).weight(1f).widthIn(min = 60.dp).fillMaxHeight().clip(RoundedCornerShape(12.dp)),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Icon(icon, null, tint = Color.White, modifier = Modifier.size(26.dp))
@@ -560,7 +610,7 @@ private fun TransitionPanel(
                 Slider(
                     value = dur, onValueChange = { dur = it }, valueRange = minMs.toFloat()..hi,
                     onValueChangeFinished = { onDuration(dur.toLong()) },
-                    colors = SliderDefaults.colors(thumbColor = BaseColors.Cyan, activeTrackColor = BaseColors.Cyan),
+                    colors = SliderDefaults.colors(thumbColor = BaseColors.Primary, activeTrackColor = BaseColors.Primary),
                     modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
                 )
                 Text("%.1f с".format(dur / 1000f), color = Color.White, fontSize = 13.sp)
@@ -573,13 +623,13 @@ private fun TransitionPanel(
 private fun TransitionTile(label: String, icon: ImageVector, selected: Boolean, previewAsset: String? = null, onClick: () -> Unit) {
     Column(
         Modifier.pressable(onClick = onClick).width(96.dp).clip(RoundedCornerShape(12.dp))
-            .border(BorderStroke(if (selected) 2.dp else 0.dp, if (selected) BaseColors.Cyan else Color.Transparent), RoundedCornerShape(12.dp))
+            .border(BorderStroke(if (selected) 2.dp else 0.dp, if (selected) BaseColors.Primary else Color.Transparent), RoundedCornerShape(12.dp))
             .background(BaseColors.DarkSlot),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Box(Modifier.fillMaxWidth().height(54.dp).background(Color(0xFF15161A)), contentAlignment = Alignment.Center) {
             if (previewAsset != null) LiveTransitionPreview(previewAsset, Modifier.fillMaxSize())
-            else Icon(icon, null, tint = if (selected) BaseColors.Cyan else Color.White, modifier = Modifier.size(26.dp))
+            else Icon(icon, null, tint = if (selected) BaseColors.Primary else Color.White, modifier = Modifier.size(26.dp))
         }
         Text(label, color = Color.White, fontSize = 11.sp, textAlign = TextAlign.Center, maxLines = 2, minLines = 2, modifier = Modifier.padding(horizontal = 4.dp, vertical = 5.dp))
     }
@@ -619,10 +669,10 @@ private fun ExportDialog(state: ExportState, onCancel: () -> Unit, onDismiss: ()
         text = {
             Column {
                 when (state) {
-                    ExportState.Preparing -> { Text("Подготовка…", color = Color.White.copy(alpha = .8f)); LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp), color = BaseColors.Cyan) }
+                    ExportState.Preparing -> { Text("Подготовка…", color = Color.White.copy(alpha = .8f)); LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 12.dp), color = BaseColors.Primary) }
                     is ExportState.Progress -> {
                         Text("${state.percent}%" + if (state.attempt > 0) " (упрощённый режим)" else "", color = Color.White.copy(alpha = .8f))
-                        LinearProgressIndicator(progress = { state.percent / 100f }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), color = BaseColors.Cyan)
+                        LinearProgressIndicator(progress = { state.percent / 100f }, modifier = Modifier.fillMaxWidth().padding(top = 12.dp), color = BaseColors.Primary)
                     }
                     is ExportState.Retrying -> Text("Устройство не справилось с первой попыткой — повторяем без эффектов и с меньшим разрешением.", color = Color.White.copy(alpha = .8f))
                     is ExportState.Done -> Text("Видео сохранено в галерею: Movies/BASE.", color = Color.White.copy(alpha = .8f))
@@ -630,7 +680,7 @@ private fun ExportDialog(state: ExportState, onCancel: () -> Unit, onDismiss: ()
                 }
             }
         },
-        confirmButton = { if (finished) TextButton(onDismiss) { Text("OK", color = BaseColors.Cyan) } },
+        confirmButton = { if (finished) TextButton(onDismiss) { Text("OK", color = BaseColors.Primary) } },
         dismissButton = { if (!finished) TextButton(onCancel) { Text("Отмена", color = Color.White) } },
     )
 }

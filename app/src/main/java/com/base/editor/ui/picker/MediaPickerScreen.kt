@@ -84,8 +84,8 @@ fun MediaPickerScreen(startOnPhotos: Boolean, onClose: () -> Unit, onConfirm: (L
         Row(Modifier.fillMaxWidth()) {
             listOf("Видео", "Фото").forEachIndexed { i, label ->
                 Column(Modifier.pressable { tab = i }.weight(1f).padding(top = 10.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text(label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = if (tab == i) BaseColors.Cyan else Color.White.copy(alpha = .6f))
-                    Box(Modifier.padding(top = 8.dp).height(3.dp).size(width = 44.dp, height = 3.dp).background(if (tab == i) BaseColors.Cyan else Color.Transparent))
+                    Text(label, fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = if (tab == i) BaseColors.Primary else Color.White.copy(alpha = .6f))
+                    Box(Modifier.padding(top = 8.dp).height(3.dp).size(width = 44.dp, height = 3.dp).background(if (tab == i) BaseColors.Primary else Color.Transparent))
                 }
             }
         }
@@ -93,7 +93,7 @@ fun MediaPickerScreen(startOnPhotos: Boolean, onClose: () -> Unit, onConfirm: (L
             if (!granted) {
                 Column(Modifier.align(Alignment.Center).padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                     Text("Разрешите доступ к видео и фото, чтобы выбрать материалы для монтажа.", color = Color.White.copy(alpha = .8f), fontSize = 16.sp)
-                    Button({ launcher.launch(mediaPermissions()) }, Modifier.padding(top = 16.dp), colors = ButtonDefaults.buttonColors(BaseColors.Cyan, Color.Black)) { Text("Разрешить доступ") }
+                    Button({ launcher.launch(mediaPermissions()) }, Modifier.padding(top = 16.dp), colors = ButtonDefaults.buttonColors(BaseColors.Primary, Color.Black)) { Text("Разрешить доступ") }
                 }
             } else if (items.isEmpty()) {
                 Text(if (tab == 0) "Видео не найдены" else "Фото не найдены", Modifier.align(Alignment.Center), color = Color.White.copy(alpha = .6f))
@@ -108,7 +108,7 @@ fun MediaPickerScreen(startOnPhotos: Boolean, onClose: () -> Unit, onConfirm: (L
             Button(
                 onClick = { onConfirm(selected.map { PickedMedia(it.uri.toString(), it.type, it.durationMs) }) },
                 enabled = selected.isNotEmpty(), shape = RoundedCornerShape(12.dp),
-                colors = ButtonDefaults.buttonColors(BaseColors.Cyan, Color.Black, BaseColors.DarkSlot, Color.White.copy(alpha = .4f)),
+                colors = ButtonDefaults.buttonColors(BaseColors.Primary, Color.Black, BaseColors.DarkSlot, Color.White.copy(alpha = .4f)),
             ) { Text(if (selected.isEmpty()) "Добавить" else "Добавить (${selected.size})", fontSize = 17.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(horizontal = 24.dp, vertical = 4.dp)) }
         }
     }
@@ -123,7 +123,7 @@ private fun MediaCell(m: DeviceMedia, order: Int, onToggle: () -> Unit) {
         if (m.durationMs > 0) Text(Format.duration(m.durationMs), Modifier.align(Alignment.BottomEnd).padding(6.dp), color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         Box(
             Modifier.align(Alignment.TopEnd).padding(8.dp).size(26.dp).clip(CircleShape)
-                .then(if (order >= 0) Modifier.background(BaseColors.Cyan) else Modifier.border(BorderStroke(2.dp, Color.White), CircleShape)),
+                .then(if (order >= 0) Modifier.background(BaseColors.Primary) else Modifier.border(BorderStroke(2.dp, Color.White), CircleShape)),
             contentAlignment = Alignment.Center,
         ) { if (order >= 0) Text("${order + 1}", color = Color.Black, fontSize = 14.sp, fontWeight = FontWeight.Bold) }
     }

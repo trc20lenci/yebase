@@ -19,25 +19,29 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 /**
- * Семантические цвета (рекомендации ui-ux-pro-max для тёмного редактора: OLED-тёмная гамма, холодные поверхности,
- * контраст текста ≥ 4.5:1). Бренд-акцент Cyan сохранён; рекомендованный навыком розовый — одна строка ниже.
+ * Палитра ровно по рекомендации ui-ux-pro-max для видеоредактора (стиль Dark Mode OLED, «video pink on dark + timeline blue»):
+ * Primary #EC4899 (текст на нём #000000), Secondary #DB2777, Accent/CTA #2563EB, Background #0F172A, Card #192134,
+ * Muted #201A32, Muted Foreground #94A3B8, Border rgba(255,255,255,.08), Destructive #DC2626.
  */
 object BaseColors {
-    val Cyan = Color(0xFF00CCDD)
-    /** Альтернативный акцент по рекомендации ui-ux-pro-max (Video pink on dark); не используется, пока не выбран. */
-    val AccentPink = Color(0xFFEC4899)
-    val Ink = Color(0xFF111318)
-    val Muted = Color(0xFF8A8F98)
-    val Line = Color(0xFFE6E8EC)
-    val SkyTop = Color(0xFFA9DBFF)
-    val DarkBg = Color(0xFF0B1020)
-    val DarkPanel = Color(0xFF161D30)
-    val DarkSlot = Color(0xFF222B42)
-    val TileEmpty = Color(0xFF2A3350)
-    /** Вторичный текст на тёмном фоне (контраст ≈ 6:1). */
+    val Primary = Color(0xFFEC4899)
+    val OnPrimary = Color(0xFF000000)
+    val Secondary = Color(0xFFDB2777)
+    /** Синий акцент: таймлайн и вторичные CTA. */
+    val Accent = Color(0xFF2563EB)
+    val DarkBg = Color(0xFF0F172A)
+    /** Card. */
+    val DarkPanel = Color(0xFF192134)
+    /** Muted. */
+    val DarkSlot = Color(0xFF201A32)
+    val TileEmpty = Color(0xFF201A32)
     val MutedOnDark = Color(0xFF94A3B8)
+    val Muted = MutedOnDark
     val BorderOnDark = Color(0x14FFFFFF)
-    val LightBg = Color(0xFFF7F9FC)
+    val Line = BorderOnDark
+    val Destructive = Color(0xFFDC2626)
+    /** Основной текст на тёмном фоне. */
+    val OnBg = Color(0xFFFFFFFF)
 }
 
 /** Inter — рекомендованная навыком гарнитура для «тёмных, точных» инструментов; вшита в приложение (кириллица есть). */
@@ -61,20 +65,22 @@ private fun interTypography(base: Typography = Typography()): Typography = base.
 
 @Composable
 fun BaseTheme(dark: Boolean, content: @Composable () -> Unit) {
-    val scheme = if (dark) darkColorScheme(
-        primary = BaseColors.Cyan, onPrimary = Color.Black,
+    // по рекомендации навыка светлая тема для этого стиля не используется: приложение всегда тёмное
+    val scheme = darkColorScheme(
+        primary = BaseColors.Primary, onPrimary = BaseColors.OnPrimary,
+        secondary = BaseColors.Secondary, onSecondary = Color.White,
+        tertiary = BaseColors.Accent, onTertiary = Color.White,
         background = BaseColors.DarkBg, onBackground = Color.White,
         surface = BaseColors.DarkPanel, onSurface = Color.White,
-    ) else lightColorScheme(
-        primary = BaseColors.Cyan, onPrimary = Color.Black,
-        background = BaseColors.LightBg, onBackground = BaseColors.Ink,
-        surface = Color.White, onSurface = BaseColors.Ink,
+        surfaceVariant = BaseColors.DarkSlot, onSurfaceVariant = BaseColors.MutedOnDark,
+        outline = BaseColors.MutedOnDark, outlineVariant = BaseColors.BorderOnDark,
+        error = BaseColors.Destructive, onError = Color.White,
     )
     val view = LocalView.current
     if (!view.isInEditMode) SideEffect {
         val w = (view.context as Activity).window
         WindowCompat.getInsetsController(w, view).apply {
-            isAppearanceLightStatusBars = !dark
+            isAppearanceLightStatusBars = false
             isAppearanceLightNavigationBars = !dark
         }
     }

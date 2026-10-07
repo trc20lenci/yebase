@@ -95,7 +95,7 @@ fun CaptionPanel(
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             listOf("Текст", "Стиль").forEachIndexed { i, t ->
                 Text(t, Modifier.pressable { tab = i }.clip(RoundedCornerShape(10.dp)).padding(horizontal = 14.dp, vertical = 8.dp),
-                    color = if (tab == i) BaseColors.Cyan else Color.White.copy(alpha = .7f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    color = if (tab == i) BaseColors.Primary else Color.White.copy(alpha = .7f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.weight(1f))
             Box(Modifier.pressable(onClick = onClose).size(40.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Check, "Готово", tint = Color.White) }
@@ -119,7 +119,7 @@ private fun TextTab(
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         when (generation) {
             GenerationState.Generating -> Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(22.dp), color = BaseColors.Cyan, strokeWidth = 2.5.dp)
+                CircularProgressIndicator(Modifier.size(22.dp), color = BaseColors.Primary, strokeWidth = 2.5.dp)
                 Text("Создание субтитров...", color = Color.White.copy(alpha = .9f), fontSize = 15.sp, modifier = Modifier.padding(start = 12.dp))
             }
             else -> {
@@ -137,7 +137,7 @@ private fun TextTab(
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Spacer(Modifier.weight(1f))
-                    Text(if (items.isEmpty()) "Создать субтитры" else "Создать заново", Modifier.pressable(onClick = onGenerate).clip(RoundedCornerShape(10.dp)).background(BaseColors.Cyan)
+                    Text(if (items.isEmpty()) "Создать субтитры" else "Создать заново", Modifier.pressable(onClick = onGenerate).clip(RoundedCornerShape(10.dp)).background(BaseColors.Primary)
                         .padding(horizontal = 16.dp, vertical = 9.dp), color = Color.Black, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 }
             }
@@ -151,7 +151,7 @@ private fun TextTab(
         LazyColumn(Modifier.padding(top = 6.dp), contentPadding = PaddingValues(bottom = 4.dp)) {
             items(items, key = { it.id }) { c ->
                 val now = playheadMs >= c.startMs && playheadMs < c.endMs
-                Row(Modifier.pressable { onOpen(c) }.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (now) BaseColors.Cyan.copy(alpha = .18f) else Color.Transparent).padding(horizontal = 8.dp, vertical = 8.dp)) {
+                Row(Modifier.pressable { onOpen(c) }.fillMaxWidth().clip(RoundedCornerShape(8.dp)).background(if (now) BaseColors.Primary.copy(alpha = .18f) else Color.Transparent).padding(horizontal = 8.dp, vertical = 8.dp)) {
                     Text(Format.duration(c.startMs), color = Color.White.copy(alpha = .5f), fontSize = 12.sp, modifier = Modifier.width(48.dp))
                     Text(c.text.ifBlank { "(пусто)" }, color = Color.White, fontSize = 14.sp, maxLines = 2)
                 }
@@ -167,7 +167,7 @@ private fun StyleTab(style: CaptionStyle, onPreset: (String) -> Unit, onStyle: (
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(CaptionPresets.all, key = { it.id }) { p ->
                 val sel = style.id == p.id
-                Column(Modifier.pressable { onPreset(p.id) }.width(92.dp).clip(RoundedCornerShape(12.dp)).border(BorderStroke(if (sel) 2.dp else 0.dp, if (sel) BaseColors.Cyan else Color.Transparent), RoundedCornerShape(12.dp))
+                Column(Modifier.pressable { onPreset(p.id) }.width(92.dp).clip(RoundedCornerShape(12.dp)).border(BorderStroke(if (sel) 2.dp else 0.dp, if (sel) BaseColors.Primary else Color.Transparent), RoundedCornerShape(12.dp))
                     .background(Color(0xFF3A3B40)), horizontalAlignment = Alignment.CenterHorizontally) {
                     StylePreviewCard(p, Modifier.fillMaxWidth().height(56.dp))
                     Text(p.name, color = Color.White, fontSize = 11.sp, modifier = Modifier.padding(vertical = 5.dp))
@@ -219,7 +219,7 @@ private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
 private fun ColorRow(selected: Int, onPick: (Int) -> Unit) {
     LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         items(Palette) { c ->
-            Box(Modifier.pressable { onPick(c) }.size(36.dp).clip(CircleShape).background(Color(c)).border(BorderStroke(if (c == selected) 3.dp else 1.dp, if (c == selected) BaseColors.Cyan else Color.White.copy(alpha = .25f)), CircleShape))
+            Box(Modifier.pressable { onPick(c) }.size(36.dp).clip(CircleShape).background(Color(c)).border(BorderStroke(if (c == selected) 3.dp else 1.dp, if (c == selected) BaseColors.Primary else Color.White.copy(alpha = .25f)), CircleShape))
         }
     }
 }
@@ -229,7 +229,7 @@ private fun SliderRow(label: String, value: Float, range: ClosedFloatingPointRan
     Row(verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = Color.White.copy(alpha = .75f), fontSize = 13.sp, modifier = Modifier.width(120.dp))
         Slider(value.coerceIn(range.start, range.endInclusive), onChange, valueRange = range, modifier = Modifier.weight(1f),
-            colors = SliderDefaults.colors(thumbColor = BaseColors.Cyan, activeTrackColor = BaseColors.Cyan))
+            colors = SliderDefaults.colors(thumbColor = BaseColors.Primary, activeTrackColor = BaseColors.Primary))
         Text(shown, color = Color.White, fontSize = 12.sp, modifier = Modifier.width(36.dp))
     }
 }
@@ -238,7 +238,7 @@ private fun SliderRow(label: String, value: Float, range: ClosedFloatingPointRan
 private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
-        Switch(checked, onChange, colors = SwitchDefaults.colors(checkedTrackColor = BaseColors.Cyan, checkedThumbColor = Color.Black))
+        Switch(checked, onChange, colors = SwitchDefaults.colors(checkedTrackColor = BaseColors.Primary, checkedThumbColor = Color.Black))
     }
 }
 
@@ -259,7 +259,7 @@ private fun EditDialog(
                 TimeStepper("Конец", item.endMs) { onTiming(item.id, item.startMs, it) }
             }
         },
-        confirmButton = { TextButton({ onText(item.id, text); onClose() }) { Text("Готово", color = BaseColors.Cyan) } },
+        confirmButton = { TextButton({ onText(item.id, text); onClose() }) { Text("Готово", color = BaseColors.Primary) } },
         dismissButton = { TextButton({ onDelete(item.id); onClose() }) { Text("Удалить", color = Color(0xFFFF8A80)) } },
     )
 }

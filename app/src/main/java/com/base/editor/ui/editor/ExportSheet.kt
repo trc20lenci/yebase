@@ -60,7 +60,7 @@ fun ExportSheet(durationMs: Long, initialResolution: String, initialFps: Int, on
             if (FPS_OPTIONS[fpsIdx] == 60) Text("60 fps не добавляет кадры у видео с меньшей частотой", color = Color.White.copy(alpha = .55f), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             Spacer(Modifier.height(20.dp))
             Box(
-                Modifier.pressable { onStart(RESOLUTIONS[resIdx].key, FPS_OPTIONS[fpsIdx]) }.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(BaseColors.Cyan)
+                Modifier.pressable { onStart(RESOLUTIONS[resIdx].key, FPS_OPTIONS[fpsIdx]) }.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(BaseColors.Primary)
                     .padding(vertical = 16.dp),
                 contentAlignment = Alignment.Center,
             ) {
@@ -82,12 +82,12 @@ private fun DiscreteSetting(title: String, labels: List<String>, index: Int, onC
     Column {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(title, color = Color.White.copy(alpha = .7f), fontSize = 14.sp, modifier = Modifier.weight(1f))
-            Text(labels[index], color = BaseColors.Cyan, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(labels[index], color = BaseColors.Primary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         }
         Slider(
             value = index.toFloat(), onValueChange = { onChange(it.roundToInt().coerceIn(0, labels.lastIndex)) },
             valueRange = 0f..labels.lastIndex.toFloat(), steps = labels.size - 2,
-            colors = SliderDefaults.colors(thumbColor = BaseColors.Cyan, activeTrackColor = BaseColors.Cyan, inactiveTrackColor = Color.White.copy(alpha = .2f),
+            colors = SliderDefaults.colors(thumbColor = BaseColors.Primary, activeTrackColor = BaseColors.Primary, inactiveTrackColor = Color.White.copy(alpha = .2f),
                 activeTickColor = Color.Black.copy(alpha = .6f), inactiveTickColor = Color.White.copy(alpha = .5f)),
         )
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {

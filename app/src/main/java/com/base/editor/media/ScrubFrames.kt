@@ -76,7 +76,7 @@ class ScrubFrames(private val context: Context, private val scope: CoroutineScop
             retrieverUri = uri
         }
         val option = if (r.exact) MediaMetadataRetriever.OPTION_CLOSEST else MediaMetadataRetriever.OPTION_CLOSEST_SYNC
-        return retriever?.getScaledFrameAtTime((r.clip.srcInMs + r.localMs) * 1000, option, MAX_SIDE, MAX_SIDE)
+        return retriever?.let { MediaFrames.scaledFrame(it, (r.clip.srcInMs + r.localMs) * 1000, option, MAX_SIDE) }
     }
 
     private fun imageFrame(uri: String): Bitmap? {

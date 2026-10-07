@@ -389,7 +389,7 @@ private fun DrawScope.drawTimeline(s: TlState, measurer: TextMeasurer, pending: 
         if (t.id == s.selectedTextId) handles(g.textTop, g.x(t.startMs), g.x(t.endMs))
     }
     s.captions.forEach { c ->
-        block(g.capTop, g.x(c.startMs), g.x(c.endMs), BaseColors.Cyan.copy(alpha = .35f), c.text)
+        block(g.capTop, g.x(c.startMs), g.x(c.endMs), BaseColors.Accent.copy(alpha = .55f), c.text)
         if (c.id == s.selectedCaptionId) handles(g.capTop, g.x(c.startMs), g.x(c.endMs))
     }
 
@@ -469,7 +469,7 @@ private fun DrawScope.drawTimeline(s: TlState, measurer: TextMeasurer, pending: 
             drawPath(d, Color.White)
             val ri = r * 0.55f
             val di = Path().apply { moveTo(x, cy - ri); lineTo(x + ri, cy); lineTo(x, cy + ri); lineTo(x - ri, cy); close() }
-            drawPath(di, BaseColors.Cyan)
+            drawPath(di, BaseColors.Primary)
         }
     }
 
@@ -480,7 +480,7 @@ private fun DrawScope.drawTimeline(s: TlState, measurer: TextMeasurer, pending: 
         val has = s.transitions.any { it.leftId == l.id }
         val cy = g.mainTop + g.mainH / 2
         val r = g.junctionR
-        drawCircle(if (has) BaseColors.Cyan else Color.White, r, Offset(x, cy))
+        drawCircle(if (has) BaseColors.Primary else Color.White, r, Offset(x, cy))
         val k = 5.dp.toPx(); val ink = Color(0xFF111318)
         val left = Path().apply { moveTo(x - k * 1.6f, cy - k); lineTo(x - k * .15f, cy); lineTo(x - k * 1.6f, cy + k); close() }
         val right = Path().apply { moveTo(x + k * 1.6f, cy - k); lineTo(x + k * .15f, cy); lineTo(x + k * 1.6f, cy + k); close() }

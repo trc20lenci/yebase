@@ -104,7 +104,8 @@ class TimelineController(
                 try {
                     val snapshot = _state.value
                     val request = CompositionRequest(snapshot, canvas, safeMode = safeMode, onTransitionFallback = { _events.tryEmit(it) },
-                        liveTransforms = { id, localMs -> _state.value.transformAt(id, localMs) })
+                        liveTransforms = { id, localMs -> _state.value.transformAt(id, localMs) },
+                        liveFx = { id -> com.base.editor.media.gl.FxParams(_state.value.chromas[id], _state.value.bgs[id]) })
                     val composition = runCatching { factory.build(request) }
                         .onFailure { Log.e(TAG, "не удалось собрать композицию", it); _events.tryEmit("Не удалось подготовить предпросмотр") }
                         .getOrNull()
@@ -180,6 +181,48 @@ class TimelineController(
         model.discardCheckpointIfNoop(); afterStructuralEdit()
     }
     fun cropOf(id: Long) = model.state().cropOf(id)
+
+    /** Скорость клипа: длина на таймлайне пересчитывается, композиция пересобирается (темп аудио — с сохранением тона). */
+    fun setSpeed(id: Long, speed: Float) {
+        pause(); model.checkpoint()
+        model.setSpeed(id, speed)
+        model.discardCheckpointIfNoop(); afterStructuralEdit()
+    }
+
+    fun setVolume(id: Long, volume: Float) {
+        pause(); model.checkpoint()
+        model.setVolume(id, volume)
+        model.discardCheckpointIfNoop(); afterStructuralEdit()
+    }
+
+    /**
+     * Хромакей. [rebuild] — только при включении/выключении эффекта (меняется цепочка эффектов); правка параметров идёт
+     * вживую: эффект читает их каждый кадр, достаточно перерисовать текущий кадр.
+     */
+    fun setChroma(id: Long, k: com.base.editor.core.ChromaKey?, rebuild: Boolean) {
+        if (rebuild) { pause(); model.checkpoint() }
+        model.setChroma(id, k)
+        if (rebuild) { model.discardCheckpointIfNoop(); afterStructuralEdit() } else refreshFrameLive()
+    }
+
+    fun setBg(id: Long, b: com.base.editor.core.BgRemoval?, rebuild: Boolean) {
+        if (rebuild) { pause(); model.checkpoint() }
+        model.setBg(id, b)
+        if (rebuild) { model.discardCheckpointIfNoop(); afterStructuralEdit() } else refreshFrameLive()
+    }
+
+    private var lastLiveRefresh = 0L
+    /** Перерисовка текущего кадра при движении слайдера: публикуем состояние и просим плеер обновить кадр (не чаще ~30 раз/с). */
+    private fun refreshFrameLive() {
+        publish()
+        val now = SystemClock.uptimeMillis()
+        if (now - lastLiveRefresh < 33 || !playerReady) return
+        lastLiveRefresh = now
+        seekPlayerSafely(player.currentPosition)
+    }
+
+    /** Слайдер отпущен: сохранить и перерисовать кадр точно. */
+    fun commitFxEdit() { model.discardCheckpointIfNoop(); publish(); _committed.tryEmit(Unit); if (playerReady) seekPlayerSafely(player.currentPosition) }
 
     // ───────── ключевые кадры ─────────
     /** Ключ под курсором (в локальном времени клипа) или null. */
