@@ -210,8 +210,8 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
     }
 
     private fun volumeProcessor(v: Float) = androidx.media3.common.audio.ChannelMixingAudioProcessor().apply {
-        putChannelMixingMatrix(androidx.media3.common.audio.ChannelMixingMatrix.create(1, 1).scaleBy(v))
-        putChannelMixingMatrix(androidx.media3.common.audio.ChannelMixingMatrix.create(2, 2).scaleBy(v))
+        putChannelMixingMatrix(androidx.media3.common.audio.ChannelMixingMatrix(1, 1, floatArrayOf(v)))
+        putChannelMixingMatrix(androidx.media3.common.audio.ChannelMixingMatrix(2, 2, floatArrayOf(v, 0f, 0f, v)))
     }
 
     private class ConstantSpeed(private val speed: Float) : androidx.media3.common.audio.SpeedProvider {
