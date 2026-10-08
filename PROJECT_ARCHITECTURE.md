@@ -1,6 +1,6 @@
 # BASE — архитектура проекта
 
-Android-видеоредактор: Kotlin, Jetpack Compose, Media3 (Transformer/CompositionPlayer), sherpa-onnx (распознавание речи), libPAG.
+Android-видеоредактор: Kotlin, Jetpack Compose, Media3 (Transformer/CompositionPlayer), Vosk (распознавание речи), LiteRT (удаление фона), libPAG.
 minSdk 29, compileSdk 36, Kotlin 2.2.20, AGP 8.9.2, Gradle 8.11.1, Compose BOM 2024.12.01, Media3 1.11.1.
 
 ## 1. Структура пакетов и файлов
@@ -172,5 +172,5 @@ Vosk 0.3.47 + JNA, libpag 4.5.98, Navigation-Compose, Lifecycle. NDK нет.
 Использованный открытый код (лицензии — в `licenses/NOTICE.txt`):
 - логика жестов холста — PhotoEditor (MIT), `MultiTouchListener.java`;
 - интерполяция ключевых кадров — Lottie (Apache 2.0), `animation/keyframe`;
-- распознавание речи — k2-fsa/sherpa-onnx (Apache 2.0), как внешняя зависимость без изменений;
-- модель Whisper (OpenAI, MIT) в ONNX int8 — csukuangfj/sherpa-onnx-whisper-base.
+- распознавание речи — Vosk и компактные модели ru/en (alphacep, Apache 2.0);
+- иконки — Lucide (ISC), сегментация силуэта — selfie_segmenter (Google, Apache 2.0).
