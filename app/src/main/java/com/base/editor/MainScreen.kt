@@ -1,5 +1,6 @@
 package com.base.editor
 
+import com.base.editor.ui.theme.Lucide
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -34,7 +35,7 @@ import com.base.editor.ui.projects.ProjectsScreen
 import com.base.editor.ui.theme.BaseColors
 
 private enum class Tab(val label: String, val icon: ImageVector) {
-    Home("Дом", Icons.Rounded.Home), Projects("Проекты", Icons.Rounded.Folder), Me("Я", Icons.Rounded.Person)
+    Home("Дом", Lucide.House), Projects("Проекты", Lucide.Folder), Me("Я", Lucide.User)
 }
 
 @Composable
@@ -44,18 +45,18 @@ fun MainScreen(onNewVideo: () -> Unit, onEditPhoto: () -> Unit, onOpenProject: (
     val projects by vm.projects.collectAsStateWithLifecycle()
 
     Scaffold(
-        containerColor = BaseColors.DarkBg,
+        containerColor = Color.White,
         bottomBar = {
-            NavigationBar(containerColor = BaseColors.DarkPanel, tonalElevation = 0.dp) {
+            NavigationBar(containerColor = Color.White, tonalElevation = 0.dp) {
                 Tab.entries.forEachIndexed { i, t ->
                     NavigationBarItem(
                         selected = tab == i, onClick = { tab = i },
                         icon = { Icon(t.icon, t.label) },
-                        label = { Text(t.label, fontSize = 12.sp) },
+                        label = { Text(t.label, fontSize = 10.sp) },
                         colors = NavigationBarItemDefaults.colors(
-                            selectedIconColor = BaseColors.Primary, selectedTextColor = BaseColors.Primary,
+                            selectedIconColor = BaseColors.Ink, selectedTextColor = BaseColors.Ink,
                             unselectedIconColor = BaseColors.Muted, unselectedTextColor = BaseColors.Muted,
-                            indicatorColor = BaseColors.Primary.copy(alpha = .16f),
+                            indicatorColor = Color.Transparent,
                         ),
                     )
                 }

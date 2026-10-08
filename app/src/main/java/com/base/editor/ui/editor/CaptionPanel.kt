@@ -1,5 +1,6 @@
 package com.base.editor.ui.editor
 
+import com.base.editor.ui.theme.Lucide
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -98,7 +99,7 @@ fun CaptionPanel(
                     color = if (tab == i) BaseColors.Primary else Color.White.copy(alpha = .7f), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             }
             Spacer(Modifier.weight(1f))
-            Box(Modifier.pressable(onClick = onClose).size(40.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Check, "Готово", tint = Color.White) }
+            Box(Modifier.pressable(onClick = onClose).size(40.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Lucide.Check, "Готово", tint = Color.White) }
         }
         Box(Modifier.heightIn(max = 250.dp).fillMaxWidth()) {
             if (tab == 0) TextTab(items, generation, playheadMs, language, onLanguage, onGenerate, onDismissError, onOpenItem, onAdd, onClearAll)
@@ -144,7 +145,7 @@ private fun TextTab(
         }
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(Modifier.pressable(onClick = onAdd).clip(RoundedCornerShape(10.dp)).background(BaseColors.DarkSlot).padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Rounded.Add, null, tint = Color.White, modifier = Modifier.size(18.dp)); Text(" Добавить здесь", color = Color.White, fontSize = 13.sp)
+                Icon(Lucide.Plus, null, tint = Color.White, modifier = Modifier.size(18.dp)); Text(" Добавить здесь", color = Color.White, fontSize = 13.sp)
             }
             if (items.isNotEmpty()) Text("Удалить все", Modifier.pressable(onClick = onClearAll).clip(RoundedCornerShape(10.dp)).background(BaseColors.DarkSlot).padding(horizontal = 12.dp, vertical = 8.dp), color = Color(0xFFFF8A80), fontSize = 13.sp)
         }

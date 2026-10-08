@@ -1,5 +1,6 @@
 package com.base.editor.ui.projects
 
+import com.base.editor.ui.theme.Lucide
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -73,24 +74,24 @@ fun ProjectsScreen(projects: List<ProjectMeta>, onCreate: () -> Unit, onOpen: (S
         .filter { query.isNullOrBlank() || it.name.contains(query!!, ignoreCase = true) }
         .let { if (sort == Sort.Name) it.sortedBy { p -> p.name } else it }
 
-    Box(Modifier.fillMaxSize().background(BaseColors.DarkBg)) {
+    Box(Modifier.fillMaxSize().background(Color.White)) {
         Column(Modifier.fillMaxSize().statusBarsPadding()) {
             Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 12.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (query == null) {
-                    Text("Проекты", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = BaseColors.OnBg, modifier = Modifier.weight(1f))
+                    Text("Проекты", fontSize = 26.sp, fontWeight = FontWeight.Bold, color = BaseColors.Ink, modifier = Modifier.weight(1f))
                 } else {
                     Row(Modifier.weight(1f).clip(RoundedCornerShape(22.dp)).background(Color(0xFFF1F2F4)).padding(horizontal = 14.dp, vertical = 11.dp), verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.weight(1f)) {
-                            if (query.isNullOrEmpty()) Text("Поиск по названию", color = BaseColors.Muted, fontSize = 16.sp)
-                            BasicTextField(query.orEmpty(), { query = it }, singleLine = true, textStyle = TextStyle(fontSize = 16.sp, color = BaseColors.OnBg), cursorBrush = SolidColor(BaseColors.OnBg))
+                            if (query.isNullOrEmpty()) Text("Поиск по названию", color = BaseColors.Muted, fontSize = 14.sp)
+                            BasicTextField(query.orEmpty(), { query = it }, singleLine = true, textStyle = TextStyle(fontSize = 14.sp, color = BaseColors.Ink), cursorBrush = SolidColor(BaseColors.Ink))
                         }
-                        Icon(Icons.Rounded.Close, "Закрыть поиск", Modifier.pressable { query = null }.size(20.dp))
+                        Icon(Lucide.X, "Закрыть поиск", Modifier.pressable { query = null }.size(20.dp))
                     }
                 }
-                if (query == null) IconBox(Icons.Rounded.Search, "Поиск") { query = "" }
+                if (query == null) IconBox(Lucide.Search, "Поиск") { query = "" }
                 Box {
                     IconBox(Icons.Rounded.SwapVert, "Сортировка") { sortMenu = true }
-                    DropdownMenu(sortMenu, { sortMenu = false }, containerColor = BaseColors.DarkPanel) {
+                    DropdownMenu(sortMenu, { sortMenu = false }, containerColor = Color.White) {
                         Sort.entries.forEach { s -> DropdownMenuItem(text = { Text(s.label) }, onClick = { sort = s; sortMenu = false }) }
                     }
                 }
@@ -98,15 +99,15 @@ fun ProjectsScreen(projects: List<ProjectMeta>, onCreate: () -> Unit, onOpen: (S
             LazyRow(contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                 items(Filter.entries) { f ->
                     val sel = f == filter
-                    Text(f.label, Modifier.pressable { filter = f }.clip(RoundedCornerShape(18.dp)).border(1.5.dp, if (sel) BaseColors.OnBg else BaseColors.Line, RoundedCornerShape(18.dp))
+                    Text(f.label, Modifier.pressable { filter = f }.clip(RoundedCornerShape(18.dp)).border(1.5.dp, if (sel) BaseColors.Ink else BaseColors.Line, RoundedCornerShape(18.dp))
                         .padding(horizontal = 22.dp, vertical = 10.dp),
-                        fontSize = 16.sp, color = BaseColors.OnBg, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal)
+                        fontSize = 14.sp, color = BaseColors.Ink, fontWeight = if (sel) FontWeight.SemiBold else FontWeight.Normal)
                 }
             }
-            Text(Format.projects(shown.size), Modifier.padding(horizontal = 20.dp, vertical = 8.dp), fontSize = 20.sp, fontWeight = FontWeight.SemiBold, color = BaseColors.OnBg)
+            Text(Format.projects(shown.size), Modifier.padding(horizontal = 20.dp, vertical = 8.dp), fontSize = 17.sp, fontWeight = FontWeight.SemiBold, color = BaseColors.Ink)
             if (shown.isEmpty()) {
                 Box(Modifier.fillMaxSize().padding(40.dp), contentAlignment = Alignment.TopCenter) {
-                    Text(if (projects.isEmpty()) "Проектов пока нет. Нажмите «Создать», чтобы выбрать видео или фото." else "Ничего не найдено.", color = BaseColors.Muted, fontSize = 15.sp)
+                    Text(if (projects.isEmpty()) "Проектов пока нет. Нажмите «Создать», чтобы выбрать видео или фото." else "Ничего не найдено.", color = BaseColors.Muted, fontSize = 13.sp)
                 }
             } else LazyColumn(contentPadding = PaddingValues(start = 20.dp, end = 12.dp, bottom = 100.dp)) {
                 itemsIndexed(shown, key = { _, p -> p.id }) { i, p -> Box(Modifier.staggeredEnter(i)) { ProjectRow(p, onOpen = { onOpen(p.id) }, onDelete = { onDelete(p.id) }) } }
@@ -117,9 +118,9 @@ fun ProjectsScreen(projects: List<ProjectMeta>, onCreate: () -> Unit, onOpen: (S
                 .padding(horizontal = 26.dp, vertical = 16.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Rounded.Add, null, tint = Color.Black)
+            Icon(Lucide.Plus, null, tint = Color.Black)
             Spacer(Modifier.width(8.dp))
-            Text("Создать", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
+            Text("Создать", fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = Color.Black)
         }
     }
 }
@@ -127,7 +128,7 @@ fun ProjectsScreen(projects: List<ProjectMeta>, onCreate: () -> Unit, onOpen: (S
 @Composable
 private fun IconBox(icon: androidx.compose.ui.graphics.vector.ImageVector, desc: String, onClick: () -> Unit) {
     Box(Modifier.pressable(onClick = onClick).size(44.dp).clip(RoundedCornerShape(22.dp)), contentAlignment = Alignment.Center) {
-        Icon(icon, desc, tint = BaseColors.OnBg)
+        Icon(icon, desc, tint = BaseColors.Ink)
     }
 }
 
@@ -137,13 +138,13 @@ private fun ProjectRow(p: ProjectMeta, onOpen: () -> Unit, onDelete: () -> Unit)
     Row(Modifier.pressable(onClick = onOpen).fillMaxWidth().clip(RoundedCornerShape(14.dp)).padding(vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         ProjectThumb(p, Modifier.size(80.dp).clip(RoundedCornerShape(14.dp)))
         Column(Modifier.weight(1f).padding(start = 16.dp)) {
-            Text(p.name, fontSize = 20.sp, fontWeight = FontWeight.Medium, color = BaseColors.OnBg)
-            Text(Format.date(p.modifiedAt), fontSize = 14.sp, color = BaseColors.Muted, modifier = Modifier.padding(top = 2.dp))
-            Text("${Format.duration(p.durationMs)}  |  ${Format.size(p.sizeBytes)}", fontSize = 14.sp, color = BaseColors.Muted, modifier = Modifier.padding(top = 2.dp))
+            Text(p.name, fontSize = 17.sp, fontWeight = FontWeight.Medium, color = BaseColors.Ink)
+            Text(Format.date(p.modifiedAt), fontSize = 12.sp, color = BaseColors.Muted, modifier = Modifier.padding(top = 2.dp))
+            Text("${Format.duration(p.durationMs)}  |  ${Format.size(p.sizeBytes)}", fontSize = 12.sp, color = BaseColors.Muted, modifier = Modifier.padding(top = 2.dp))
         }
         Box {
             IconBox(Icons.Rounded.MoreHoriz, "Меню") { menu = true }
-            DropdownMenu(menu, { menu = false }, containerColor = BaseColors.DarkPanel) {
+            DropdownMenu(menu, { menu = false }, containerColor = Color.White) {
                 DropdownMenuItem(text = { Text("Удалить") }, onClick = { menu = false; onDelete() })
             }
         }

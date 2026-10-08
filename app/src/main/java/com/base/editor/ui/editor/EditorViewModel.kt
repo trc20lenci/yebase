@@ -35,6 +35,7 @@ import kotlinx.coroutines.FlowPreview
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.debounce
@@ -396,6 +397,22 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     private val maskStore = com.base.editor.media.MaskStore(app)
     private val bgRemover = com.base.editor.media.BgRemover(app, maskStore)
 
+    /** Плитка на главном экране: после загрузки клипов сразу открываем выбранный инструмент. */
+    private fun runPendingTool() = viewModelScope.launch {
+        val tool = com.base.editor.data.PendingTool.take() ?: return@launch
+        val ready = kotlinx.coroutines.withTimeoutOrNull(6000) { controller.state.first { st -> st.clips.any { it.row == 0 } } } ?: return@launch
+        val first = ready.clips.filter { it.row == 0 }.minByOrNull { it.startMs } ?: return@launch
+        when (tool) {
+            "subtitles" -> openCaptions()
+            "text" -> openNewText()
+            "music" -> addAudio()
+            "bg" -> { select(first.id); openMediaTool(MediaTool.BG) }
+            "chroma" -> { select(first.id); openMediaTool(MediaTool.CHROMA) }
+            "speed" -> { select(first.id); openMediaTool(MediaTool.SPEED) }
+        }
+    }
+    init { runPendingTool() }
+
     val selectedClip get() = selectedId.value?.let { id -> clips.value.firstOrNull { it.id == id } }
 
     fun openMediaTool(t: MediaTool) {
@@ -490,6 +507,12 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         val clip = clips.value.firstOrNull { it.id == clipId } ?: return
         val hasKeys = keyframes.value[clipId].orEmpty().isNotEmpty()
         val baked = liveClipTransform.value?.takeIf { it.id == clipId }?.baked ?: effectiveTransform(clip)
+        if (liveClipTransform.value == null) {
+            // начало жеста: показываем кадр клипа картинкой поверх плеера — она следует за пальцами в реальном времени
+            val local = (playheadMs.value - clip.startMs).coerceAtLeast(0L)
+            scrubHideJob?.cancel(); scrubOverlayOn.value = true
+            scrubFrames.request(clip, local, true, baked, controller.cropOf(clipId))
+        }
         liveClipTransform.value = LiveClip(clipId, baked, transform)
         if (hasKeys) {
             // автоключ как в CapCut: любое движение кадра пальцем фиксирует ключ на текущей миллисекунде
@@ -511,6 +534,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
                 val deadline = System.currentTimeMillis() + 1000
                 while (controller.appliedVersion.value == applied && System.currentTimeMillis() < deadline) delay(40)
                 liveClipTransform.value = null
+                scrubOverlayOn.value = false; scrubFrames.clear()
             }
         } else controller.pause()
     }

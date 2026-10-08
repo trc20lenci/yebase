@@ -1,5 +1,6 @@
 package com.base.editor.ui.editor
 
+import com.base.editor.ui.theme.Lucide
 import android.view.Gravity
 import android.view.WindowManager
 import androidx.compose.foundation.BorderStroke
@@ -119,18 +120,18 @@ fun TextToolbar(
     androidx.compose.animation.Crossfade(sub, animationSpec = androidx.compose.animation.core.tween(160, easing = androidx.compose.animation.core.CubicBezierEasing(0.23f, 1f, 0.32f, 1f)), label = "textSub") { cur ->
         if (cur == null) {
             Row(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                PanelAction("Назад", Icons.Rounded.ChevronLeft, onClick = onBack)
-                PanelAction("Текст", Icons.Rounded.Edit, onClick = onEditText)
-                PanelAction("Разделить", Icons.Rounded.VerticalSplit, onClick = onSplit)
-                PanelAction("Шрифты", Icons.Rounded.TextFields) { onSub(TextSub.FONTS) }
-                PanelAction("Стили", Icons.Rounded.AutoAwesome) { onSub(TextSub.STYLES) }
-                PanelAction("Анимация", Icons.Rounded.Animation) { onSub(TextSub.ANIMATION) }
-                PanelAction("Цвет", Icons.Rounded.Palette) { onSub(TextSub.COLOR) }
-                PanelAction("Удалить", Icons.Rounded.DeleteOutline, onClick = onDelete)
+                PanelAction("Назад", Lucide.ChevronLeft, onClick = onBack)
+                PanelAction("Текст", Lucide.Pencil, onClick = onEditText)
+                PanelAction("Разделить", Lucide.SquareSplitHorizontal, onClick = onSplit)
+                PanelAction("Шрифты", Lucide.CaseSensitive) { onSub(TextSub.FONTS) }
+                PanelAction("Стили", Lucide.Paintbrush) { onSub(TextSub.STYLES) }
+                PanelAction("Анимация", Lucide.Sparkles) { onSub(TextSub.ANIMATION) }
+                PanelAction("Цвет", Lucide.Palette) { onSub(TextSub.COLOR) }
+                PanelAction("Удалить", Lucide.Trash2, onClick = onDelete)
             }
         } else {
             Row(Modifier.fillMaxSize().padding(start = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                PanelAction("Назад", Icons.Rounded.ChevronLeft) { onSub(null) }
+                PanelAction("Назад", Lucide.ChevronLeft) { onSub(null) }
                 LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(end = 12.dp), verticalAlignment = Alignment.CenterVertically) {
                     when (cur) {
                         TextSub.FONTS -> items(com.base.editor.text.TextFonts.all, key = { it.id }) { f ->

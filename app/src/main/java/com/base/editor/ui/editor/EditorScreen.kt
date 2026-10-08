@@ -1,5 +1,6 @@
 package com.base.editor.ui.editor
 
+import com.base.editor.ui.theme.Lucide
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
@@ -204,7 +205,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     Column(Modifier.fillMaxSize().background(BaseColors.DarkBg).systemBarsPadding()) {
         // верхняя панель: только выход, логотип и «Экспорт» — параметры рендера в отдельном листе
         AnimatedVisibility(!fullscreen, enter = barEnter, exit = barExit) { Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            RoundIcon(Icons.Rounded.Close, "Выйти", ::close)
+            RoundIcon(Lucide.X, "Выйти", ::close)
             Spacer(Modifier.width(8.dp))
             Image(painterResource(R.drawable.logo_base_white), "BASE", Modifier.height(20.dp))
             Spacer(Modifier.weight(1f))
@@ -236,30 +237,30 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     Crossfade(mode, animationSpec = androidx.compose.animation.core.tween(160, easing = EaseOutStrong), label = "toolbar", modifier = Modifier.fillMaxWidth().height(TOOLBAR_HEIGHT_DP.dp).background(BaseColors.DarkPanel)) { m ->
                         when (m) {
                             ToolMode.MAIN -> ToolRow {
-                                ToolButton(Icons.Rounded.ContentCut, "Изменить") { vm.selectAtPlayhead() }
-                                ToolButton(Icons.Rounded.MusicNote, "Звук", onClick = vm::addAudio)
-                                ToolButton(Icons.Rounded.TextFields, "Текст", onClick = vm::openNewText)
-                                ToolButton(Icons.Rounded.ClosedCaption, "Субтитры", onClick = vm::openCaptions)
-                                ToolButton(Icons.Rounded.AspectRatio, "Формат", onClick = vm::openFormat)
-                                ToolButton(Icons.Rounded.Layers, "Наложение") { soon(ctx) }
+                                ToolButton(Lucide.Scissors, "Изменить") { vm.selectAtPlayhead() }
+                                ToolButton(Lucide.Music, "Звук", onClick = vm::addAudio)
+                                ToolButton(Lucide.Type, "Текст", onClick = vm::openNewText)
+                                ToolButton(Lucide.Captions, "Субтитры", onClick = vm::openCaptions)
+                                ToolButton(Lucide.Ratio, "Формат", onClick = vm::openFormat)
+                                ToolButton(Lucide.Layers, "Наложение") { soon(ctx) }
                             }
                             ToolMode.MEDIA -> ScrollToolRow {
-                                ToolButton(Icons.Rounded.ChevronLeft, "Назад") { vm.select(null) }
-                                ToolButton(Icons.Rounded.VerticalSplit, "Разделить", onClick = vm::split)
-                                ToolButton(Icons.Rounded.Speed, "Скорость") { vm.openMediaTool(MediaTool.SPEED) }
-                                ToolButton(Icons.Rounded.VolumeUp, "Громкость") { vm.openMediaTool(MediaTool.VOLUME) }
-                                ToolButton(Icons.Rounded.AutoFixHigh, "Фон") { vm.openMediaTool(MediaTool.BG) }
-                                ToolButton(Icons.Rounded.Colorize, "Хромакей") { vm.openMediaTool(MediaTool.CHROMA) }
-                                ToolButton(Icons.Rounded.Crop, "Кадрирование", onClick = vm::openCrop)
-                                ToolButton(Icons.Rounded.Animation, "Анимации") { soon(ctx) }
-                                ToolButton(Icons.Rounded.DeleteOutline, "Удалить", onClick = vm::deleteSelected)
+                                ToolButton(Lucide.ChevronLeft, "Назад") { vm.select(null) }
+                                ToolButton(Lucide.SquareSplitHorizontal, "Разделить", onClick = vm::split)
+                                ToolButton(Lucide.Gauge, "Скорость") { vm.openMediaTool(MediaTool.SPEED) }
+                                ToolButton(Lucide.Volume2, "Громкость") { vm.openMediaTool(MediaTool.VOLUME) }
+                                ToolButton(Lucide.WandSparkles, "Фон") { vm.openMediaTool(MediaTool.BG) }
+                                ToolButton(Lucide.Pipette, "Хромакей") { vm.openMediaTool(MediaTool.CHROMA) }
+                                ToolButton(Lucide.Crop, "Кадрирование", onClick = vm::openCrop)
+                                ToolButton(Lucide.Sparkles, "Анимации") { soon(ctx) }
+                                ToolButton(Lucide.Trash2, "Удалить", onClick = vm::deleteSelected)
                             }
                             ToolMode.AUDIO -> ToolRow {
-                                ToolButton(Icons.Rounded.ChevronLeft, "Назад") { vm.select(null) }
-                                ToolButton(Icons.Rounded.VerticalSplit, "Разделить", onClick = vm::split)
-                                ToolButton(Icons.Rounded.Speed, "Скорость") { vm.openMediaTool(MediaTool.SPEED) }
-                                ToolButton(Icons.Rounded.VolumeUp, "Громкость") { vm.openMediaTool(MediaTool.VOLUME) }
-                                ToolButton(Icons.Rounded.DeleteOutline, "Удалить", onClick = vm::deleteSelected)
+                                ToolButton(Lucide.ChevronLeft, "Назад") { vm.select(null) }
+                                ToolButton(Lucide.SquareSplitHorizontal, "Разделить", onClick = vm::split)
+                                ToolButton(Lucide.Gauge, "Скорость") { vm.openMediaTool(MediaTool.SPEED) }
+                                ToolButton(Lucide.Volume2, "Громкость") { vm.openMediaTool(MediaTool.VOLUME) }
+                                ToolButton(Lucide.Trash2, "Удалить", onClick = vm::deleteSelected)
                             }
                             ToolMode.TEXT -> texts.firstOrNull { it.id == selText }?.let { t ->
                                 TextToolbar(
@@ -270,11 +271,11 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                                 )
                             }
                             ToolMode.CAPTION -> ToolRow {
-                                ToolButton(Icons.Rounded.ChevronLeft, "Назад") { vm.select(null) }
-                                ToolButton(Icons.Rounded.Edit, "Текст", onClick = vm::openCaptionInput)
-                                ToolButton(Icons.Rounded.VerticalSplit, "Разделить", onClick = vm::splitCaption)
-                                ToolButton(Icons.Rounded.Palette, "Стиль", onClick = vm::openCaptions)
-                                ToolButton(Icons.Rounded.DeleteOutline, "Удалить", onClick = vm::deleteCaption)
+                                ToolButton(Lucide.ChevronLeft, "Назад") { vm.select(null) }
+                                ToolButton(Lucide.Pencil, "Текст", onClick = vm::openCaptionInput)
+                                ToolButton(Lucide.SquareSplitHorizontal, "Разделить", onClick = vm::splitCaption)
+                                ToolButton(Lucide.Palette, "Стиль", onClick = vm::openCaptions)
+                                ToolButton(Lucide.Trash2, "Удалить", onClick = vm::deleteCaption)
                             }
                         }
                     }
@@ -380,8 +381,11 @@ private fun PreviewStage(
             val surfaceTick by vm.controller.surfaceReset.collectAsStateWithLifecycle()
             AndroidView(
                 factory = { c ->
-                    // TextureView-вариант PlayerView: подчиняется graphicsLayer, поэтому жест виден на кадре мгновенно
-                    (android.view.LayoutInflater.from(c).inflate(R.layout.view_player_texture, null) as PlayerView).apply {
+                    // CompositionPlayer умеет выводить только в SurfaceView (TextureView он не поддерживает и падает)
+                    PlayerView(c).apply {
+                        useController = false
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                        setShutterBackgroundColor(android.graphics.Color.BLACK)
                         player = vm.controller.player
                         tag = surfaceTick
                     }
@@ -390,15 +394,7 @@ private fun PreviewStage(
                     it.resizeMode = if (pending) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
                     if (it.tag != surfaceTick) { it.player = null; it.player = vm.controller.player; it.tag = surfaceTick }   // сброс залипшей поверхности
                 },
-                modifier = Modifier.fillMaxSize().graphicsLayer {
-                    // пока кадр обновляется после жеста, показываем разницу между новым и «запечённым» положением
-                    liveClip?.let { l ->
-                        transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f + l.baked.x, 0.5f + l.baked.y)
-                        translationX = (l.current.x - l.baked.x) * size.width; translationY = (l.current.y - l.baked.y) * size.height
-                        scaleX = l.current.scale / l.baked.scale; scaleY = scaleX
-                        rotationZ = l.current.rotationDeg - l.baked.rotationDeg
-                    }
-                },
+                modifier = Modifier.fillMaxSize(),
             )
             // кадр под курсором напрямую из файла, пока плеер на паузе догоняет позицию при перемотке
             val sf = scrubFrame
@@ -406,8 +402,10 @@ private fun PreviewStage(
                 Image(
                     sf.image, null, contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                     modifier = Modifier.fillMaxSize().graphicsLayer {
-                        translationX = sf.transform.x * size.width; translationY = sf.transform.y * size.height
-                        scaleX = sf.transform.scale; scaleY = sf.transform.scale; rotationZ = sf.transform.rotationDeg
+                        // во время жеста — текущее положение пальцев (SurfaceView не умеет масштаб/поворот, а картинка Compose — умеет)
+                        val t = liveClip?.current ?: sf.transform
+                        translationX = t.x * size.width; translationY = t.y * size.height
+                        scaleX = t.scale; scaleY = t.scale; rotationZ = t.rotationDeg
                     },
                 )
             }
@@ -422,12 +420,12 @@ private fun PreviewStage(
         // полноэкранный режим: иконка внизу справа; в полноэкранном — ещё Play/Pause и время
         if (fullscreen) {
             Row(Modifier.align(Alignment.BottomStart).padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                RoundIcon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Воспроизвести", vm::togglePlay, size = 48.dp)
+                RoundIcon(if (playing) Lucide.Pause else Lucide.Play, if (playing) "Пауза" else "Воспроизвести", vm::togglePlay, size = 48.dp)
                 Text("  ${Format.duration(playhead)} / ${Format.duration(total)}", color = Color.White, fontSize = 14.sp)
             }
         }
         Box(Modifier.align(Alignment.BottomEnd).padding(10.dp)) {
-            RoundIcon(if (fullscreen) Icons.Rounded.FullscreenExit else Icons.Rounded.Fullscreen, if (fullscreen) "Выйти из полноэкранного режима" else "На весь экран", onToggleFullscreen)
+            RoundIcon(if (fullscreen) Lucide.Minimize else Lucide.Maximize, if (fullscreen) "Выйти из полноэкранного режима" else "На весь экран", onToggleFullscreen)
         }
     }
 }
@@ -445,15 +443,15 @@ private fun TransportRow(vm: EditorViewModel, hasMainSelected: Boolean) {
             Text(Format.duration(playhead), color = Color.White, fontSize = 14.sp, fontWeight = FontWeight.Medium)
             Text("  /  ${Format.duration(total)}", color = Color.White.copy(alpha = .5f), fontSize = 14.sp)
         }
-        RoundIcon(if (playing) Icons.Rounded.Pause else Icons.Rounded.PlayArrow, if (playing) "Пауза" else "Воспроизвести", vm::togglePlay, size = 52.dp)
+        RoundIcon(if (playing) Lucide.Pause else Lucide.Play, if (playing) "Пауза" else "Воспроизвести", vm::togglePlay, size = 52.dp)
         Row(Modifier.align(Alignment.CenterEnd), verticalAlignment = Alignment.CenterVertically) {
             // ромбик ключевого кадра: только когда выбран клип основной дорожки (режим «Изменить»)
             if (hasMainSelected) {
                 KeyframeButton(hasKey = vm.hasKeyframeAtCursor(), onClick = vm::toggleKeyframe)
                 Spacer(Modifier.width(4.dp))
             }
-            RoundIcon(Icons.Rounded.Undo, "Отменить", vm::undo, enabled = canUndo)
-            RoundIcon(Icons.Rounded.Redo, "Повторить", vm::redo, enabled = canRedo)
+            RoundIcon(Lucide.Undo2, "Отменить", vm::undo, enabled = canUndo)
+            RoundIcon(Lucide.Redo2, "Повторить", vm::redo, enabled = canRedo)
         }
     }
 }
@@ -479,7 +477,7 @@ private fun TimelineHost(
                 .clip(RoundedCornerShape(10.dp)).padding(vertical = 4.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Icon(if (muted) Icons.Rounded.VolumeOff else Icons.Rounded.VolumeUp, null, tint = Color.White, modifier = Modifier.size(26.dp))
+            Icon(if (muted) Lucide.VolumeX else Lucide.Volume2, null, tint = Color.White, modifier = Modifier.size(26.dp))
             Text(if (muted) "Вкл. звук клипа" else "Выкл. звук клипа", color = Color.White.copy(alpha = .8f), fontSize = 10.sp, textAlign = TextAlign.Center, lineHeight = 12.sp)
         }
         // «+» закреплён у правого края на уровне основной дорожки — доступен при любой прокрутке и зуме
@@ -487,7 +485,7 @@ private fun TimelineHost(
             Modifier.pressable(onClick = vm::addMedia).align(Alignment.TopEnd).padding(top = 46.dp, end = 8.dp).size(44.dp)
                 .shadow(6.dp, CircleShape).clip(CircleShape).background(Color.White),
             contentAlignment = Alignment.Center,
-        ) { Icon(Icons.Rounded.Add, "Добавить видео или фото", tint = Color.Black, modifier = Modifier.size(28.dp)) }
+        ) { Icon(Lucide.Plus, "Добавить видео или фото", tint = Color.Black, modifier = Modifier.size(28.dp)) }
     }
 }
 
@@ -500,7 +498,7 @@ private fun FormatPanel(current: com.base.editor.core.CanvasFormat, onPick: (com
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("Формат", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
             Spacer(Modifier.weight(1f))
-            RoundIcon(Icons.Rounded.Check, "Готово", onClose)
+            RoundIcon(Lucide.Check, "Готово", onClose)
         }
         Row(Modifier.fillMaxWidth().padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             com.base.editor.core.CanvasFormat.entries.forEach { f ->
@@ -594,14 +592,14 @@ private fun TransitionPanel(
     Column(Modifier.fillMaxWidth().background(BaseColors.DarkPanel).padding(top = 8.dp, bottom = 10.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Переходы", color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-            RoundIcon(Icons.Rounded.Check, "Готово", onClose, size = 40.dp)
+            RoundIcon(Lucide.Check, "Готово", onClose, size = 40.dp)
         }
         LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             item {
                 TransitionTile("Нет", Icons.Rounded.Block, selected = current == null) { onPick(null, dur.toLong()) }
             }
             items(items, key = { it.id }) { t ->
-                TransitionTile(t.label, Icons.Rounded.AutoAwesome, selected = current?.shaderId == t.id, previewAsset = "shaders/transitions/previews/${t.id}.webp") { onPick(t.id, dur.toLong()) }
+                TransitionTile(t.label, Lucide.Paintbrush, selected = current?.shaderId == t.id, previewAsset = "shaders/transitions/previews/${t.id}.webp") { onPick(t.id, dur.toLong()) }
             }
         }
         if (current != null && maxMs > minMs) {

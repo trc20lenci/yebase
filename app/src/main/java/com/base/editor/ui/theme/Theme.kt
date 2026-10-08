@@ -19,9 +19,8 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 /**
- * Палитра ровно по рекомендации ui-ux-pro-max для видеоредактора (стиль Dark Mode OLED, «video pink on dark + timeline blue»):
- * Primary #EC4899 (текст на нём #000000), Secondary #DB2777, Accent/CTA #2563EB, Background #0F172A, Card #192134,
- * Muted #201A32, Muted Foreground #94A3B8, Border rgba(255,255,255,.08), Destructive #DC2626.
+ * Акцент по рекомендации ui-ux-pro-max: Primary #EC4899 (текст на нём #000000), Secondary #DB2777, Accent #2563EB,
+ * Destructive #DC2626. Светлые экраны остаются белыми, как были; редактор — тёмный, как был.
  */
 object BaseColors {
     val Primary = Color(0xFFEC4899)
@@ -29,18 +28,22 @@ object BaseColors {
     val Secondary = Color(0xFFDB2777)
     /** Синий акцент: таймлайн и вторичные CTA. */
     val Accent = Color(0xFF2563EB)
-    val DarkBg = Color(0xFF0F172A)
-    /** Card. */
-    val DarkPanel = Color(0xFF192134)
-    /** Muted. */
-    val DarkSlot = Color(0xFF201A32)
-    val TileEmpty = Color(0xFF201A32)
-    val MutedOnDark = Color(0xFF94A3B8)
-    val Muted = MutedOnDark
-    val BorderOnDark = Color(0x14FFFFFF)
-    val Line = BorderOnDark
     val Destructive = Color(0xFFDC2626)
-    /** Основной текст на тёмном фоне. */
+
+    // светлые экраны (Дом / Проекты / Я)
+    val Ink = Color(0xFF111318)
+    val Muted = Color(0xFF8A8F98)
+    val Line = Color(0xFFE6E8EC)
+    val SkyTop = Color(0xFFA9DBFF)
+    val LightBg = Color.White
+
+    // тёмный редактор
+    val DarkBg = Color(0xFF0F0F11)
+    val DarkPanel = Color(0xFF1B1C20)
+    val DarkSlot = Color(0xFF26272C)
+    val TileEmpty = Color(0xFF2E2F35)
+    val MutedOnDark = Color(0xFF94A3B8)
+    val BorderOnDark = Color(0x14FFFFFF)
     val OnBg = Color(0xFFFFFFFF)
 }
 
@@ -65,29 +68,35 @@ private fun interTypography(base: Typography = Typography()): Typography = base.
 
 @Composable
 fun BaseTheme(dark: Boolean, content: @Composable () -> Unit) {
-    // по рекомендации навыка светлая тема для этого стиля не используется: приложение всегда тёмное
-    val scheme = darkColorScheme(
-        primary = BaseColors.Primary, onPrimary = BaseColors.OnPrimary,
-        secondary = BaseColors.Secondary, onSecondary = Color.White,
-        tertiary = BaseColors.Accent, onTertiary = Color.White,
+    val scheme = if (dark) darkColorScheme(
+        primary = BaseColors.Primary, onPrimary = BaseColors.OnPrimary, secondary = BaseColors.Secondary, tertiary = BaseColors.Accent,
         background = BaseColors.DarkBg, onBackground = Color.White,
-        surface = BaseColors.DarkPanel, onSurface = Color.White,
-        surfaceVariant = BaseColors.DarkSlot, onSurfaceVariant = BaseColors.MutedOnDark,
-        outline = BaseColors.MutedOnDark, outlineVariant = BaseColors.BorderOnDark,
-        error = BaseColors.Destructive, onError = Color.White,
+        surface = BaseColors.DarkPanel, onSurface = Color.White, error = BaseColors.Destructive,
+    ) else lightColorScheme(
+        primary = BaseColors.Primary, onPrimary = BaseColors.OnPrimary, secondary = BaseColors.Secondary, tertiary = BaseColors.Accent,
+        background = BaseColors.LightBg, onBackground = BaseColors.Ink,
+        surface = Color.White, onSurface = BaseColors.Ink, error = BaseColors.Destructive,
     )
     val view = LocalView.current
     if (!view.isInEditMode) SideEffect {
         val w = (view.context as Activity).window
         WindowCompat.getInsetsController(w, view).apply {
-            isAppearanceLightStatusBars = false
+            isAppearanceLightStatusBars = !dark
             isAppearanceLightNavigationBars = !dark
         }
     }
-    MaterialTheme(colorScheme = scheme, typography = interTypography()) {
-        // Text() без явной гарнитуры берёт стиль из LocalTextStyle — задаём Inter на всё приложение
-        androidx.compose.material3.ProvideTextStyle(androidx.compose.ui.text.TextStyle(fontFamily = InterFamily), content)
+    // текст чуть мельче по всему приложению
+    val d = androidx.compose.ui.platform.LocalDensity.current
+    androidx.compose.runtime.CompositionLocalProvider(
+        androidx.compose.ui.platform.LocalDensity provides androidx.compose.ui.unit.Density(d.density, d.fontScale * TEXT_SCALE),
+    ) {
+        MaterialTheme(colorScheme = scheme, typography = interTypography()) {
+            // Text() без явной гарнитуры берёт стиль из LocalTextStyle — задаём Inter на всё приложение
+            androidx.compose.material3.ProvideTextStyle(androidx.compose.ui.text.TextStyle(fontFamily = InterFamily), content)
+        }
     }
 }
+
+private const val TEXT_SCALE = 0.92f
 
 fun soon(ctx: Context) = Toast.makeText(ctx, "Скоро появится", Toast.LENGTH_SHORT).show()

@@ -1,5 +1,6 @@
 package com.base.editor.ui.editor
 
+import com.base.editor.ui.theme.Lucide
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -68,7 +69,7 @@ private val PANEL_BG = BaseColors.DarkPanel
 private fun PanelHeader(title: String, onClose: () -> Unit) {
     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         Text(title, color = Color.White, fontSize = 16.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        Box(Modifier.pressable(onClick = onClose).size(44.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Check, "Готово", tint = Color.White) }
+        Box(Modifier.pressable(onClick = onClose).size(44.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Lucide.Check, "Готово", tint = Color.White) }
     }
 }
 
@@ -192,7 +193,7 @@ fun VolumePanel(volume: Float, onChange: (Float) -> Unit, onClose: () -> Unit) {
                 }.clip(RoundedCornerShape(12.dp)).background(animatedSelectColor(live == 0f, onColor = BaseColors.Destructive)).padding(horizontal = 14.dp, vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(Icons.Rounded.VolumeOff, null, tint = Color.White, modifier = Modifier.size(20.dp))
+                Icon(Lucide.VolumeX, null, tint = Color.White, modifier = Modifier.size(20.dp))
                 Spacer(Modifier.width(6.dp))
                 Text(if (live == 0f) "Звук выкл." else "Mute", color = Color.White, fontSize = 13.sp, fontWeight = FontWeight.Medium)
             }
@@ -232,7 +233,7 @@ fun ChromaPanel(
                     Modifier.pressable(onClick = onPickColor).clip(RoundedCornerShape(12.dp)).background(BaseColors.DarkSlot).padding(horizontal = 12.dp, vertical = 8.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Icon(Icons.Rounded.Colorize, null, tint = Color.White, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(6.dp))
+                    Icon(Lucide.Pipette, null, tint = Color.White, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(6.dp))
                     Text("Пипетка", color = Color.White, fontSize = 13.sp)
                 }
                 Swatch(0xFF00FF00.toInt(), key.color == 0xFF00FF00.toInt()) { onChange { it.copy(color = 0xFF00FF00.toInt()) }; onDone() }

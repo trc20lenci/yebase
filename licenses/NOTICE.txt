@@ -40,3 +40,6 @@ BASE — уведомления о сторонних компонентах
 
 11) Модель Whisper (OpenAI, MIT License) в формате ONNX int8 для sherpa-onnx:
     huggingface.co/csukuangfj/sherpa-onnx-whisper-base; скачивается приложением при первом запросе субтитров.
+
+12) Иконки: Lucide (lucide.dev, ISC License), векторные пути перенесены в ui/theme/Lucide.kt без изменений.
+13) Хромакей и удаление фона: сегментация — Google MediaPipe Tasks (Apache License 2.0), модель selfie_segmenter скачивается при первом использовании.

@@ -1,5 +1,6 @@
 package com.base.editor.ui.picker
 
+import com.base.editor.ui.theme.Lucide
 import android.Manifest
 import android.content.pm.PackageManager
 import android.os.Build
@@ -79,7 +80,7 @@ fun MediaPickerScreen(startOnPhotos: Boolean, onClose: () -> Unit, onConfirm: (L
 
     Column(Modifier.fillMaxSize().background(BaseColors.DarkBg).statusBarsPadding().navigationBarsPadding()) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(Modifier.pressable(onClick = onClose).size(48.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Icons.Rounded.Close, "Закрыть", tint = Color.White) }
+            Box(Modifier.pressable(onClick = onClose).size(48.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Lucide.X, "Закрыть", tint = Color.White) }
         }
         Row(Modifier.fillMaxWidth()) {
             listOf("Видео", "Фото").forEachIndexed { i, label ->
