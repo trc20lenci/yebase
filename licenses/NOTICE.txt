@@ -35,11 +35,10 @@ BASE — уведомления о сторонних компонентах
    относительно центра вписанного кадра) повторяют подход PhotoEditor (burhanrashid52, MIT License),
    файл MultiTouchListener.java; код написан для BASE заново по этой схеме.
 
-10) Распознавание речи: k2-fsa/sherpa-onnx (Apache License 2.0), официальный AAR v1.13.8,
-    используется как внешняя зависимость без изменений. Распознавание выполняется на устройстве.
+10) Распознавание речи: Vosk (alphacep, Apache License 2.0) и компактные модели vosk-model-small-ru-0.22 /
+    vosk-model-small-en-us-0.15 (Apache License 2.0); скачиваются приложением при первом запросе субтитров, работают офлайн.
 
-11) Модель Whisper (OpenAI, MIT License) в формате ONNX int8 для sherpa-onnx:
-    huggingface.co/csukuangfj/sherpa-onnx-whisper-base; скачивается приложением при первом запросе субтитров.
+11) JNA (Java Native Access, Apache License 2.0 / LGPL 2.1) — зависимость Vosk.
 
 12) Иконки: Lucide (lucide.dev, ISC License), векторные пути перенесены в ui/theme/Lucide.kt без изменений.
-13) Хромакей и удаление фона: сегментация — Google MediaPipe Tasks (Apache License 2.0), модель selfie_segmenter скачивается при первом использовании.
+13) Хромакей и удаление фона: сегментация — модель selfie_segmenter (Google MediaPipe, Apache License 2.0) скачивается при первом использовании и запускается через LiteRT.

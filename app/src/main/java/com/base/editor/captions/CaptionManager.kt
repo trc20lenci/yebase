@@ -3,6 +3,8 @@ package com.base.editor.captions
 import android.content.Context
 import android.util.Log
 import com.base.editor.captions.asr.AutoCaptionGenerator
+import com.base.editor.captions.asr.GenerationProgress
+import com.base.editor.captions.asr.SpeechLanguage
 import com.base.editor.captions.asr.NoSpeechException
 import com.base.editor.domain.TimelineState
 import com.base.editor.media.AppDispatchers
@@ -20,7 +22,8 @@ import java.util.UUID
 
 sealed interface GenerationState {
     data object Idle : GenerationState
-    data object Generating : GenerationState
+    data class Downloading(val fraction: Float) : GenerationState
+    data class Recognizing(val fraction: Float) : GenerationState
     data class Failed(val message: String) : GenerationState
 }
 
@@ -56,12 +59,20 @@ class CaptionManager(
     val hasData get() = _items.value.isNotEmpty()
 
     // ───────── генерация ─────────
-    fun generate(timeline: TimelineState) {
+    fun isModelReady(lang: SpeechLanguage) = generator.isModelReady(lang)
+
+    fun generate(timeline: TimelineState, lang: SpeechLanguage) {
         job?.cancel()
         job = scope.launch(dispatchers.default) {
-            _generation.value = GenerationState.Generating
+            _generation.value = GenerationState.Recognizing(0f)
             try {
-                _items.value = generator.generate(timeline)
+                val result = generator.generate(timeline, lang) { p ->
+                    _generation.value = when (p) {
+                        is GenerationProgress.DownloadingModel -> GenerationState.Downloading(p.fraction)
+                        is GenerationProgress.Recognizing -> GenerationState.Recognizing(p.fraction)
+                    }
+                }
+                _items.value = result
                 _generation.value = GenerationState.Idle
                 _committed.tryEmit(Unit)
             } catch (e: kotlinx.coroutines.CancellationException) {
@@ -70,10 +81,10 @@ class CaptionManager(
                 _generation.value = GenerationState.Failed("Речь в видео не найдена")
             } catch (e: java.io.IOException) {
                 Log.e(TAG, "сеть/файлы", e)
-                _generation.value = GenerationState.Failed("Не удалось создать субтитры. Проверьте подключение к интернету и повторите.")
+                _generation.value = GenerationState.Failed("Не удалось скачать модель распознавания. Проверьте интернет.")
             } catch (e: Throwable) {
                 Log.e(TAG, "распознавание", e)
-                _generation.value = GenerationState.Failed("Не удалось создать субтитры на этом устройстве")
+                _generation.value = GenerationState.Failed("Не удалось распознать речь на этом устройстве")
             }
         }
     }

@@ -11,45 +11,64 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import org.vosk.LibVosk
+import org.vosk.LogLevel
+import org.vosk.Model
+import org.vosk.Recognizer
 import kotlin.coroutines.coroutineContext
+
+sealed interface GenerationProgress {
+    data class DownloadingModel(val fraction: Float) : GenerationProgress
+    data class Recognizing(val fraction: Float) : GenerationProgress
+}
 
 class NoSpeechException : Exception("Речь не найдена")
 
 /**
- * Автосубтитры: звук каждого видеоклипа (с учётом обрезки) → участки с голосом → окна до 12 с →
- * распознавание на устройстве → слова с таймингами → карточки.
- * Всё выполняется на фоновых диспетчерах; модель при необходимости подготавливается автоматически.
+ * Автосубтитры: для каждого видеоклипа основной дорожки декодируем звук (с учётом обрезки In/Out),
+ * распознаём речь офлайн с пословными таймингами и переводим время клипа во время проекта.
+ * Работает целиком на фоновых диспетчерах.
  */
 class AutoCaptionGenerator(
-    private val context: Context,
-    private val store: WhisperModelStore = WhisperModelStore(context),
+    context: Context,
+    private val models: SpeechModelStore = SpeechModelStore(context),
     private val extractor: AudioPcmExtractor = AudioPcmExtractor(context),
     private val segmenter: CaptionSegmenter = CaptionSegmenter(),
     private val default: CoroutineDispatcher = Dispatchers.Default,
 ) {
-    suspend fun generate(timeline: TimelineState): List<CaptionItem> {
+    fun isModelReady(lang: SpeechLanguage) = models.isReady(lang)
+
+    suspend fun generate(
+        timeline: TimelineState,
+        lang: SpeechLanguage,
+        onProgress: (GenerationProgress) -> Unit,
+    ): List<CaptionItem> {
         val clips = timeline.clips.filter { it.row == 0 && it.type == MediaType.VIDEO }.sortedBy { it.startMs }
         if (clips.isEmpty()) throw NoSpeechException()
 
-        val modelFile = store.ensure()
+        val modelDir = models.ensure(lang) { onProgress(GenerationProgress.DownloadingModel(it)) }
         return withContext(default) {
-            val frontend = context.assets.open("asr/filters_vocab_multilingual.bin").use(WhisperFrontend::load)
+            LibVosk.setLogLevel(LogLevel.WARNINGS)
             val words = mutableListOf<WordTimestamp>()
-            WhisperTranscriber(modelFile, frontend).use { recognizer ->
+            Model(modelDir.absolutePath).use { model ->
+                val totalMs = clips.sumOf { it.lengthMs }.coerceAtLeast(1)
+                var doneMs = 0L
                 for (clip in clips) {
                     coroutineContext.ensureActive()
-                    val pcm = readPcm(clip.uri, clip.srcInMs, clip.srcInMs + clip.lengthMs) ?: continue
-                    val energies = SpeechActivity.frameEnergies(pcm)
-                    val voiced = SpeechActivity.detect(energies)
-                    for (w in SpeechActivity.windows(voiced, energies, clip.lengthMs)) {
-                        coroutineContext.ensureActive()
-                        val text = clean(recognizer.transcribe(SpeechActivity.toFloats(pcm, w.startMs, w.endMs)).text)
-                        if (text.isEmpty()) continue
-                        val tokens = text.split(Regex("\\s+")).filter { it.isNotEmpty() }
-                        SpeechActivity.assignWordTimes(tokens, w.voiced, Span(w.startMs, w.endMs), energies).forEach {
-                            words += it.copy(startMs = clip.startMs + it.startMs, endMs = clip.startMs + it.endMs)
+                    Recognizer(model, 16_000f).use { rec ->
+                        rec.setWords(true)
+                        val clipWords = mutableListOf<WordTimestamp>()
+                        var fedSamples = 0L
+                        val ok = extractor.stream(clip.uri, clip.srcInMs, clip.srcInMs + clip.lengthMs) { pcm, n ->
+                            if (rec.acceptWaveForm(pcm, n)) collect(rec.result, clip.startMs, clip.lengthMs, clipWords)
+                            fedSamples += n
+                            onProgress(GenerationProgress.Recognizing(((doneMs + fedSamples / 16L).toFloat() / totalMs).coerceIn(0f, 1f)))
                         }
+                        if (ok) collect(rec.finalResult, clip.startMs, clip.lengthMs, clipWords)
+                        words += clipWords
                     }
+                    doneMs += clip.lengthMs
                 }
             }
             if (words.isEmpty()) throw NoSpeechException()
@@ -57,28 +76,16 @@ class AutoCaptionGenerator(
         }
     }
 
-    private suspend fun readPcm(uri: String, fromMs: Long, toMs: Long): ShortArray? {
-        var buf = ShortArray(16_000 * 60); var n = 0
-        val ok = extractor.stream(uri, fromMs, toMs) { chunk, len ->
-            if (n + len > buf.size) buf = buf.copyOf(maxOf(buf.size * 2, n + len))
-            System.arraycopy(chunk, 0, buf, n, len); n += len
-        }
-        return if (ok && n > 0) buf.copyOf(n) else null
+    /** Разбирает JSON результата: время слов — секунды от начала участка → мс на шкале проекта. */
+    private fun collect(json: String, clipStartMs: Long, clipLenMs: Long, into: MutableList<WordTimestamp>) {
+        runCatching {
+            val arr = JSONObject(json).optJSONArray("result") ?: return
+            for (i in 0 until arr.length()) {
+                val o = arr.getJSONObject(i)
+                val s = (o.getDouble("start") * 1000).toLong().coerceIn(0, clipLenMs)
+                val e = (o.getDouble("end") * 1000).toLong().coerceIn(s, clipLenMs)
+                into += WordTimestamp(o.getString("word"), clipStartMs + s, clipStartMs + e)
+            }
+        }.onFailure { Log.w("BaseCaptions", "не удалось разобрать результат распознавания", it) }
     }
-
-    /** Отбрасывает «галлюцинации» на тишине/музыке: пустые, из одних знаков, с зацикленными словами. */
-    private fun clean(raw: String): String {
-        val t = raw.replace(Regex("[♪♫\\[\\]()*]"), " ").trim()
-        if (t.none { it.isLetterOrDigit() }) return ""
-        val out = mutableListOf<String>()
-        var run = 0
-        for (w in t.split(Regex("\\s+"))) {
-            if (out.isNotEmpty() && out.last().equals(w, ignoreCase = true)) { if (++run >= 3) continue } else run = 0
-            out += w
-        }
-        Log.d(TAG, "распознано: ${out.size} слов")
-        return out.joinToString(" ")
-    }
-
-    private companion object { const val TAG = "BaseCaptions" }
 }

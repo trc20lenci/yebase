@@ -372,9 +372,9 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     fun closeCaptions() { captionPanelOpen.value = false; editingCaptionId.value = null }
     fun openCaptionItem(c: CaptionItem) { controller.pause(); controller.seekTo(c.startMs); editingCaptionId.value = c.id }
     fun addCaptionHere() { editingCaptionId.value = captions.addAt(playheadMs.value) }
-    fun generateCaptions() {
+    fun generateCaptions(lang: com.base.editor.captions.asr.SpeechLanguage) {
         if (controller.state.value.clips.none { it.type == com.base.editor.core.MediaType.VIDEO }) { events.value = "Нужен хотя бы один видеоклип со звуком"; return }
-        controller.pause(); captions.generate(controller.state.value)
+        controller.pause(); captions.generate(controller.state.value, lang)
     }
 
     // ───────── кадрирование ─────────

@@ -293,7 +293,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     val playhead by vm.playheadMs.collectAsStateWithLifecycle()
                     CaptionPanel(
                         items = captionItems, style = captionStyle, generation = captionGen, playheadMs = playhead, editingId = editingCaption,
-                        onGenerate = vm::generateCaptions, onDismissError = vm.captions::dismissError,
+                        modelReady = vm.captions::isModelReady, onGenerate = vm::generateCaptions, onCancel = vm.captions::cancelGeneration, onDismissError = vm.captions::dismissError,
                         onOpenItem = vm::openCaptionItem, onCloseEdit = { vm.editingCaptionId.value = null },
                         onUpdateText = vm.captions::updateText, onUpdateTiming = vm.captions::updateTiming, onDelete = vm.captions::delete,
                         onAdd = vm::addCaptionHere, onClearAll = vm.captions::clearAll,

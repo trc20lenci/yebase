@@ -34,8 +34,8 @@ app/src/main/java/com/base/editor/
 │   ├── CaptionOps.kt, CaptionSegmenter.kt, CaptionJson.kt, CaptionFonts.kt
 │   ├── CaptionRenderer.kt       — единый рисовальщик субтитров (превью = экспорт)
 │   ├── CaptionManager.kt        — владелец субтитров проекта (карточки, стиль, генерация)
-│   └── asr/                     — AudioPcmExtractor, SpeechActivity, SherpaModelStore (загрузка модели),
-│                                  SherpaWhisper (OfflineRecognizer), WordTimings (токены → слова), AutoCaptionGenerator
+│   └── asr/                     — AudioPcmExtractor, SpeechActivity, SpeechLanguage (ru/en), SpeechModelStore (загрузка модели),
+│                                  AutoCaptionGenerator (Vosk)
 ├── text/                        — TextClip (+шрифт, контур, тень, стиль, анимация), TextTrack, TextJson, TextClipRenderer,
 │                                  TextFonts (9 вшитых шрифтов с кириллицей), TextStyles (пресеты + TextAnimator)
 ├── pag/                         — PagTemplateStore, PagTitles
@@ -145,21 +145,16 @@ TextTrackTest, SpeechActivityTest.
 
 ## 4. Распознавание речи (автосубтитры)
 
-- Движок — **k2-fsa/sherpa-onnx** (Apache 2.0), `OfflineRecognizer` с моделью **Whisper-base int8 (ONNX)**,
-  `enableTokenTimestamps = true`: токены приходят с метками времени, из них `WordTimings` собирает слова
-  (токен с пробелом в начале открывает слово). Если токены непригодны (размеры не совпали, разорванный символ UTF-8),
-  слова равномерно распределяются по окну — тайминги тогда приблизительные.
-- Язык (`CaptionLanguage`): «Русский» → `language = "ru"`, «Английский» → `"en"`, «Авто» → `""` (автоопределение Whisper).
-- `SherpaModelStore`: три файла (`base-encoder.int8.onnx`, `base-decoder.int8.onnx`, `base-tokens.txt`, ≈161 МБ)
-  скачиваются тихо в `filesDir/asr/whisper-base-int8` с `huggingface.co/csukuangfj/sherpa-onnx-whisper-base`.
-  Целостность: SHA-256 сверяется с заголовком `X-Linked-Etag` (для LFS-файлов это хеш содержимого), иначе — по размеру.
-  В UI — только индикатор «Создание субтитров…».
-- `AutoCaptionGenerator`: PCM из клипа → `SpeechActivity` режет на окна с голосом → `SherpaWhisper.transcribe` →
-  `WordTimings` → смещение на время клипа/окна → `CaptionSegmenter`. Фильтр зацикленных повторов.
-- Рендеринг (`CaptionRenderer`): контур STROKE 2.5 dp (join/cap ROUND) + чистая заливка поверх +
-  фиксированная тень (offset 2 dp, чёрный 40%). Без BlurMaskFilter и размытий.
-- Не проверено на устройстве: качество русского у Whisper-base и точность токен-таймингов. Запасной вариант для
-  русского — модель GigaAM v2 (`sherpa-onnx-nemo-ctc-giga-am-v2-russian`) из релизов sherpa-onnx.
+- Движок — **Vosk** (офлайн, Apache 2.0) с компактными моделями: русская `vosk-model-small-ru-0.22` (~45 МБ) и английская
+  `vosk-model-small-en-us-0.15` (~40 МБ). Язык выбирается вручную в панели «Субтитры» (чипы «Русский» / «English»);
+  Vosk сразу отдаёт пословные тайминги, поэтому подсветка караоке идёт по настоящим меткам, без подгонки.
+- `SpeechModelStore` скачивает архив выбранного языка в `filesDir/speech-models` (с прогрессом и отменой), распаковывает
+  с защитой от выхода за каталог и отмечает готовность файлом `.ready`; дальше всё работает офлайн.
+- `AutoCaptionGenerator`: для каждого видеоклипа основной дорожки `AudioPcmExtractor.stream` отдаёт PCM 16 кГц с учётом
+  обрезки → `Recognizer` с `setWords(true)` → время слов клипа переводится во время проекта → `CaptionSegmenter` собирает карточки.
+- Состояния генерации: `Downloading(fraction)` → `Recognizing(fraction)` → `Idle` / `Failed`.
+- Рендеринг (`CaptionRenderer`): контур STROKE 2.5 dp (join/cap ROUND) + чистая заливка поверх + фиксированная тень,
+  без BlurMaskFilter.
 
 ## 5. Сборка и библиотеки
 
@@ -170,11 +165,9 @@ TextTrackTest, SpeechActivityTest.
 
 CI: `.github/workflows/build.yml` — на каждый пуш в main: debug-APK, юнит-тесты (`testDebugUnitTest`) и подписанный AAB. Ошибки читаются через аннотации запуска.
 
-sherpa-onnx AAR (v1.13.8, ≈50 МБ) Gradle скачивает сам: задача `downloadSherpa` кладёт файл в `app/libs/` (в `.gitignore`)
-перед `preBuild`. Нужен доступ к github.com. ABI ограничены `arm64-v8a` и `armeabi-v7a`.
 
 Зависимости: Compose BOM 2024.12.01, Media3 1.11.1 (transformer, effect, exoplayer, ui, common),
-sherpa-onnx 1.13.8 (AAR с нативными библиотеками), libpag 4.5.98, Navigation-Compose, Lifecycle. NDK нет.
+Vosk 0.3.47 + JNA, libpag 4.5.98, Navigation-Compose, Lifecycle. NDK нет.
 
 Использованный открытый код (лицензии — в `licenses/NOTICE.txt`):
 - логика жестов холста — PhotoEditor (MIT), `MultiTouchListener.java`;

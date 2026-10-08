@@ -14,7 +14,7 @@ android {
         targetSdk = 36
         versionCode = 2
         versionName = "0.1.0"
-        // sherpa-onnx несёт нативные библиотеки; x86 нужен только эмуляторам и сильно раздувает APK
+        // нативные библиотеки (Vosk, LiteRT); x86 нужен только эмуляторам и сильно раздувает APK
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a") }
     }
 
@@ -65,6 +65,9 @@ dependencies {
     implementation(libs.media3.transformer)
     implementation(libs.media3.effect)
     implementation(libs.litert)
+    // Vosk: офлайн-распознавание речи с пословными таймингами (маленькие модели ru/en); JNA нужен ему для нативных вызовов
+    implementation(libs.vosk.android)
+    implementation("net.java.dev.jna:jna:5.14.0@aar")
     implementation(libs.libpag)
 
     testImplementation(libs.junit)

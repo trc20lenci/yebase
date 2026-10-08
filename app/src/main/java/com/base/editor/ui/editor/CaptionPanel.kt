@@ -54,6 +54,7 @@ import com.base.editor.captions.CaptionItem
 import com.base.editor.captions.CaptionPresets
 import com.base.editor.captions.CaptionStyle
 import com.base.editor.captions.GenerationState
+import com.base.editor.captions.asr.SpeechLanguage
 import com.base.editor.captions.WordAnimation
 import com.base.editor.captions.WordTimestamp
 import androidx.compose.foundation.layout.height
@@ -75,7 +76,9 @@ fun CaptionPanel(
     generation: GenerationState,
     playheadMs: Long,
     editingId: String?,
-    onGenerate: () -> Unit,
+    modelReady: (SpeechLanguage) -> Boolean,
+    onGenerate: (SpeechLanguage) -> Unit,
+    onCancel: () -> Unit,
     onDismissError: () -> Unit,
     onOpenItem: (CaptionItem) -> Unit,
     onCloseEdit: () -> Unit,
@@ -89,6 +92,7 @@ fun CaptionPanel(
     onClose: () -> Unit,
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
+    var lang by rememberSaveable { mutableStateOf(SpeechLanguage.RU) }
 
     Column(Modifier.fillMaxWidth().background(BaseColors.DarkPanel).padding(top = 6.dp, bottom = 8.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -100,7 +104,7 @@ fun CaptionPanel(
             Box(Modifier.pressable(onClick = onClose).size(40.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Lucide.Check, "Готово", tint = Color.White) }
         }
         Box(Modifier.heightIn(max = 250.dp).fillMaxWidth()) {
-            if (tab == 0) TextTab(items, generation, playheadMs, onGenerate, onDismissError, onOpenItem, onAdd, onClearAll)
+            if (tab == 0) TextTab(items, generation, playheadMs, lang, { lang = it }, modelReady, onGenerate, onCancel, onDismissError, onOpenItem, onAdd, onClearAll)
             else StyleTab(style, onPreset, onStyle)
         }
     }
@@ -110,25 +114,26 @@ fun CaptionPanel(
 
 @Composable
 private fun TextTab(
-    items: List<CaptionItem>, generation: GenerationState, playheadMs: Long,
-    onGenerate: () -> Unit, onDismissError: () -> Unit,
+    items: List<CaptionItem>, generation: GenerationState, playheadMs: Long, lang: SpeechLanguage, onLang: (SpeechLanguage) -> Unit,
+    modelReady: (SpeechLanguage) -> Boolean, onGenerate: (SpeechLanguage) -> Unit, onCancel: () -> Unit, onDismissError: () -> Unit,
     onOpen: (CaptionItem) -> Unit, onAdd: () -> Unit, onClearAll: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         when (generation) {
-            GenerationState.Generating -> Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                CircularProgressIndicator(Modifier.size(22.dp), color = BaseColors.Primary, strokeWidth = 2.5.dp)
-                Text("Создание субтитров...", color = Color.White.copy(alpha = .9f), fontSize = 15.sp, modifier = Modifier.padding(start = 12.dp))
-            }
+            is GenerationState.Downloading -> Progress("Загрузка модели распознавания… ${(generation.fraction * 100).toInt()}%", generation.fraction, onCancel)
+            is GenerationState.Recognizing -> Progress("Распознаём речь… ${(generation.fraction * 100).toInt()}%", generation.fraction, onCancel)
             else -> {
                 if (generation is GenerationState.Failed) {
                     Text(generation.message, color = Color(0xFFFF8A80), fontSize = 13.sp, modifier = Modifier.pressable(onClick = onDismissError).padding(vertical = 4.dp))
                 }
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // язык речи выбирается вручную: под каждый язык — своя компактная офлайн-модель
+                    SpeechLanguage.entries.forEach { l -> Chip(l.label, l == lang) { onLang(l) } }
                     Spacer(Modifier.weight(1f))
-                    Text(if (items.isEmpty()) "Создать субтитры" else "Создать заново", Modifier.pressable(onClick = onGenerate).clip(RoundedCornerShape(10.dp)).background(BaseColors.Primary)
+                    Text(if (items.isEmpty()) "Создать субтитры" else "Создать заново", Modifier.pressable { onGenerate(lang) }.clip(RoundedCornerShape(10.dp)).background(BaseColors.Primary)
                         .padding(horizontal = 16.dp, vertical = 9.dp), color = Color.Black, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 }
+                if (!modelReady(lang)) Text("Первый раз потребуется скачать модель (~${lang.approxMb} МБ), дальше всё работает офлайн.", color = Color.White.copy(alpha = .55f), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
         }
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -197,6 +202,15 @@ private fun StyleTab(style: CaptionStyle, onPreset: (String) -> Unit, onStyle: (
 }
 
 @Composable private fun Label(t: String) = Text(t, color = Color.White.copy(alpha = .6f), fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp, bottom = 6.dp))
+
+@Composable
+private fun Progress(label: String, fraction: Float, onCancel: () -> Unit) {
+    Column(Modifier.padding(vertical = 6.dp)) {
+        Text(label, color = Color.White.copy(alpha = .85f), fontSize = 14.sp)
+        androidx.compose.material3.LinearProgressIndicator(progress = { fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), color = BaseColors.Primary)
+        Text("Отмена", color = Color.White.copy(alpha = .7f), fontSize = 13.sp, modifier = Modifier.pressable(onClick = onCancel).padding(vertical = 4.dp))
+    }
+}
 
 @Composable
 private fun Chip(text: String, selected: Boolean, onClick: () -> Unit) {
