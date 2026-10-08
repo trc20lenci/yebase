@@ -49,7 +49,7 @@ private class FxProgram(
         GlProgram(VERTEX_SHADER, FX_FRAGMENT).apply {
             setBufferAttribute("aFramePosition", GlUtil.getNormalizedCoordinateBounds(), GlUtil.HOMOGENEOUS_COORDINATE_VECTOR_SIZE)
         }
-    } catch (e: GlUtil.GlException) { Log.e(TAG, "шейдер эффекта клипа не собрался — кадры идут без изменений", e); null }
+    } catch (e: GlUtil.GlException) { FxDiagnostics.report("Эффект клипа: шейдер не собрался (${e.message?.take(80)})"); null }
 
     private var maskTex = 0
     private var maskW = 0
@@ -87,10 +87,15 @@ private class FxProgram(
             p.bindAttributesAndUniforms()
             GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4)
             GlUtil.checkGlError()
-        } catch (e: GlUtil.GlException) {
-            throw VideoFrameProcessingException(e)
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0)                   // вторая текстурная единица больше не активна для следующих эффектов
+        } catch (e: Exception) {
+            // любой сбой эффекта не должен останавливать конвейер кадров (иначе «звук идёт, картинка стоит»): пропускаем кадр как есть
+            if (!reported) { reported = true; FxDiagnostics.report("Эффект клипа: ${e.javaClass.simpleName}: ${e.message?.take(90)}") }
+            runCatching { blit.draw(inputTexId) }
         }
     }
+
+    private var reported = false
 
     /** Загружает маску на время [srcMs] (две соседние маски смешиваются — без «лесенки» при 12 к/с). */
     private fun uploadMask(srcMs: Long) {

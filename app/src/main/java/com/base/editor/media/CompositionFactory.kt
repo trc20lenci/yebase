@@ -49,6 +49,8 @@ data class CompositionRequest(
     val fps: Int? = null,
     /** Превью: живые параметры хромакея/удаления фона по clipId (слайдеры работают без пересборки). null — снимок [state]. */
     val liveFx: ((Long) -> com.base.editor.media.gl.FxParams)? = null,
+    /** Фон полей вокруг кадра. */
+    val canvasBg: com.base.editor.core.CanvasBg = com.base.editor.core.CanvasBg.BLACK,
 )
 
 /**
@@ -96,15 +98,26 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
             req.state.crops[clip.id]?.takeIf { !it.isFull }?.let { c ->
                 effects += Crop(-1f + 2f * c.left, -1f + 2f * c.right, 1f - 2f * c.bottom, 1f - 2f * c.top)
             }
-            effects += (Presentation.createForWidthAndHeight(req.canvas.width, req.canvas.height, Presentation.LAYOUT_SCALE_TO_FIT))
             val live = req.liveTransforms
             val keys = req.state.keyframes[clip.id].orEmpty()
-            if (live != null) {
-                val startMs = clip.startMs; val id = clip.id
-                effects += MatrixTransformation { us -> transformMatrix(live(id, (us / 1000 - startMs).coerceAtLeast(0L)), req.canvas) }
+            if (req.canvasBg != com.base.editor.core.CanvasBg.BLACK && clip.type != MediaType.AUDIO) {
+                // фон не чёрный: вписывание, положение кадра и фон полей — одним эффектом (фон не двигается вместе с кадром)
+                val id = clip.id; val startMs = clip.startMs; val staticT = req.state.transforms[id] ?: ClipTransform()
+                val transformAt: (Long) -> ClipTransform = when {
+                    live != null -> { us -> live(id, (us / 1000 - startMs).coerceAtLeast(0L)) }
+                    keys.isNotEmpty() -> { us -> com.base.editor.domain.KeyframeTrack.at(keys, (us / 1000 - startMs).coerceAtLeast(0L)) }
+                    else -> { _ -> staticT }
+                }
+                effects += com.base.editor.media.gl.BackgroundFitEffect(req.canvas.width, req.canvas.height, req.canvasBg.argb) { us -> transformMatrix(transformAt(us), req.canvas) }
+            } else {
+                effects += (Presentation.createForWidthAndHeight(req.canvas.width, req.canvas.height, Presentation.LAYOUT_SCALE_TO_FIT))
+                if (live != null) {
+                    val startMs = clip.startMs; val id = clip.id
+                    effects += MatrixTransformation { us -> transformMatrix(live(id, (us / 1000 - startMs).coerceAtLeast(0L)), req.canvas) }
+                }
+                else if (keys.isNotEmpty()) effects += keyframeTransformEffect(keys, clip.startMs, req.canvas)
+                else req.state.transforms[clip.id]?.takeIf { !it.isIdentity }?.let { effects += clipTransformEffect(it, req.canvas) }
             }
-            else if (keys.isNotEmpty()) effects += keyframeTransformEffect(keys, clip.startMs, req.canvas)
-            else req.state.transforms[clip.id]?.takeIf { !it.isIdentity }?.let { effects += clipTransformEffect(it, req.canvas) }
             if (!req.safeMode) {
                 inbound[clip.id]?.let { t ->
                     catalog.spec(t.shaderId)?.let { spec ->

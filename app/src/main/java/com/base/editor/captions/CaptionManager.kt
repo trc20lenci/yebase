@@ -56,12 +56,12 @@ class CaptionManager(
     val hasData get() = _items.value.isNotEmpty()
 
     // ───────── генерация ─────────
-    fun generate(timeline: TimelineState, language: CaptionLanguage = CaptionLanguage.AUTO) {
+    fun generate(timeline: TimelineState) {
         job?.cancel()
         job = scope.launch(dispatchers.default) {
             _generation.value = GenerationState.Generating
             try {
-                _items.value = generator.generate(timeline, language)
+                _items.value = generator.generate(timeline)
                 _generation.value = GenerationState.Idle
                 _committed.tryEmit(Unit)
             } catch (e: kotlinx.coroutines.CancellationException) {

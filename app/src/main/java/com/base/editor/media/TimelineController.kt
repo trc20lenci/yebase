@@ -105,7 +105,8 @@ class TimelineController(
                     val snapshot = _state.value
                     val request = CompositionRequest(snapshot, canvas, safeMode = safeMode, onTransitionFallback = { _events.tryEmit(it) },
                         liveTransforms = { id, localMs -> _state.value.transformAt(id, localMs) },
-                        liveFx = { id -> com.base.editor.media.gl.FxParams(_state.value.chromas[id], _state.value.bgs[id]) })
+                        liveFx = { id -> com.base.editor.media.gl.FxParams(_state.value.chromas[id], _state.value.bgs[id]) },
+                        canvasBg = canvasBg)
                     val composition = runCatching { factory.build(request) }
                         .onFailure { Log.e(TAG, "не удалось собрать композицию", it); _events.tryEmit("Не удалось подготовить предпросмотр") }
                         .getOrNull()
@@ -153,6 +154,10 @@ class TimelineController(
     private fun textsChanged() { _texts.value = textTrack.all(); _committed.tryEmit(Unit) }
 
     /** Размер кадра превью/экспорта. Меняется редко (смена пропорций или качества). */
+    var canvasBg: com.base.editor.core.CanvasBg = com.base.editor.core.CanvasBg.BLACK
+        private set
+    fun setCanvasBg(bg: com.base.editor.core.CanvasBg) { if (bg == canvasBg) return; canvasBg = bg; requestRebuild() }
+
     fun setCanvas(size: Size) {
         if (size == canvas) return
         canvas = size
@@ -246,7 +251,15 @@ class TimelineController(
         model.discardCheckpointIfNoop()
         publish(); _committed.tryEmit(Unit)
         if (playerReady) seekPlayerSafely(player.currentPosition)
-        scope.launch { delay(FRAME_REFRESH_MS); _applied.value++ }
+        scope.launch { awaitSeekSettled(); _applied.value++ }
+    }
+
+    /** Ждёт, пока плеер отработает перемотку и покажет кадр (с запасом на отрисовку); не дольше [maxMs]. */
+    suspend fun awaitSeekSettled(maxMs: Long = 3000) {
+        val deadline = SystemClock.uptimeMillis() + maxMs
+        delay(80)
+        while ((seekInFlight || player.playbackState == Player.STATE_BUFFERING) && SystemClock.uptimeMillis() < deadline) delay(30)
+        delay(SEEK_RENDER_MARGIN_MS)
     }
 
     /** Автоключ во время жеста трансформации: фиксирует новые координаты на текущей миллисекунде (без пересборки). */
@@ -515,6 +528,7 @@ class TimelineController(
         const val POLL_MS = 33L
         const val PREVIEW_PAD_MS = 400L
         const val FRAME_REFRESH_MS = 120L
+        const val SEEK_RENDER_MARGIN_MS = 250L
         const val SCRUB_MS = 33L
         const val SEEK_INFLIGHT_MAX_MS = 250L
         const val SURFACE_REBIND_MS = 70L

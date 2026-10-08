@@ -6,6 +6,8 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import com.base.editor.ui.theme.BaseMotion
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.material.icons.rounded.Colorize
 import androidx.compose.material.icons.rounded.AutoFixHigh
 import androidx.compose.material.icons.rounded.Speed
@@ -84,6 +86,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.material.icons.rounded.AspectRatio
@@ -153,7 +156,8 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     val exportSheet by vm.exportSheetOpen.collectAsStateWithLifecycle()
     val mediaTool by vm.mediaTool.collectAsStateWithLifecycle()
     val bgJob by vm.bgJob.collectAsStateWithLifecycle()
-    val colorPick by vm.colorPickOpen.collectAsStateWithLifecycle()
+    val bgBar by vm.bgBarOpen.collectAsStateWithLifecycle()
+    val canvasBgSel by vm.canvasBg.collectAsStateWithLifecycle()
     val pagTemplates by vm.pagTemplates.collectAsStateWithLifecycle()
 
     SideEffect { vm.onRequestAddMedia = onAddMedia }
@@ -173,7 +177,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
             fullscreen -> fullscreen = false
             exportSheet -> vm.closeExportSheet()
             textSub != null -> vm.setTextSub(null)
-            colorPick -> vm.cancelColorPicker()
+            bgBar -> vm.closeBgBar()
             mediaTool != null -> vm.closeMediaTool()
             formatPanel -> vm.closeFormat()
             captionPanel -> vm.closeCaptions()
@@ -191,10 +195,6 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
         onDismiss = vm::closeExportSheet,
         onStart = { res, fps -> vm.setResolution(res); vm.setExportFps(fps); vm.closeExportSheet(); vm.startExport() },
     )
-    if (colorPick) {
-        val pf by vm.pickFrame.collectAsStateWithLifecycle()
-        ColorPickDialog(pf, onPick = vm::pickChromaColor, onCancel = vm::cancelColorPicker)
-    }
     val cropId by vm.cropClipId.collectAsStateWithLifecycle()
     if (cropId != null) {
         val frame by vm.cropFrame.collectAsStateWithLifecycle()
@@ -228,6 +228,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                 Column(Modifier.fillMaxSize()) {
                     TimelineHost(vm, clips, transitions, captionItems, texts, keyframes, selected, selText, selCaption)
                     val mode = when {
+                        bgBar && selText == null && selCaption == null && selected == null -> ToolMode.BACKGROUND
                         selText != null -> ToolMode.TEXT
                         selCaption != null -> ToolMode.CAPTION
                         selected != null && clips.firstOrNull { it.id == selected }?.type == com.base.editor.core.MediaType.AUDIO -> ToolMode.AUDIO
@@ -236,13 +237,14 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     }
                     Crossfade(mode, animationSpec = androidx.compose.animation.core.tween(160, easing = EaseOutStrong), label = "toolbar", modifier = Modifier.fillMaxWidth().height(TOOLBAR_HEIGHT_DP.dp).background(BaseColors.DarkPanel)) { m ->
                         when (m) {
-                            ToolMode.MAIN -> ToolRow {
+                            ToolMode.MAIN -> ScrollToolRow {
                                 ToolButton(Lucide.Scissors, "Изменить") { vm.selectAtPlayhead() }
                                 ToolButton(Lucide.Music, "Звук", onClick = vm::addAudio)
                                 ToolButton(Lucide.Type, "Текст", onClick = vm::openNewText)
                                 ToolButton(Lucide.Captions, "Субтитры", onClick = vm::openCaptions)
                                 ToolButton(Lucide.Ratio, "Формат", onClick = vm::openFormat)
                                 ToolButton(Lucide.Layers, "Наложение") { soon(ctx) }
+                                ToolButton(Lucide.Image, "Фон", onClick = vm::openBgBar)
                             }
                             ToolMode.MEDIA -> ScrollToolRow {
                                 ToolButton(Lucide.ChevronLeft, "Назад") { vm.select(null) }
@@ -255,6 +257,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                                 ToolButton(Lucide.Sparkles, "Анимации") { soon(ctx) }
                                 ToolButton(Lucide.Trash2, "Удалить", onClick = vm::deleteSelected)
                             }
+                            ToolMode.BACKGROUND -> BackgroundsBar(canvasBgSel, onPick = vm::setCanvasBg, onBack = vm::closeBgBar)
                             ToolMode.AUDIO -> ToolRow {
                                 ToolButton(Lucide.ChevronLeft, "Назад") { vm.select(null) }
                                 ToolButton(Lucide.SquareSplitHorizontal, "Разделить", onClick = vm::split)
@@ -286,12 +289,10 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     awaitPointerEventScope { while (true) awaitPointerEvent().changes.forEach { it.consume() } }
                 })
 
-                val captionLang by vm.captionLanguage.collectAsStateWithLifecycle()
                 BottomPanel(visible = captionPanel) {
                     val playhead by vm.playheadMs.collectAsStateWithLifecycle()
                     CaptionPanel(
                         items = captionItems, style = captionStyle, generation = captionGen, playheadMs = playhead, editingId = editingCaption,
-                        language = captionLang, onLanguage = vm::setCaptionLanguage,
                         onGenerate = vm::generateCaptions, onDismissError = vm.captions::dismissError,
                         onOpenItem = vm::openCaptionItem, onCloseEdit = { vm.editingCaptionId.value = null },
                         onUpdateText = vm.captions::updateText, onUpdateTiming = vm.captions::updateTiming, onDelete = vm.captions::delete,
@@ -306,9 +307,10 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                         MediaTool.VOLUME -> VolumePanel(toolClip.volume, onChange = vm::setClipVolume, onClose = vm::closeMediaTool)
                         MediaTool.CHROMA -> {
                             val ck by vm.controller.state.collectAsStateWithLifecycle()
+                            val pipOn by vm.pipetteOn.collectAsStateWithLifecycle()
                             ChromaPanel(
-                                key = ck.chromas[toolClip.id], onToggle = vm::toggleChroma, onChange = vm::updateChroma, onDone = vm::commitFx,
-                                onPickColor = vm::openColorPicker, onClose = vm::closeMediaTool,
+                                key = ck.chromas[toolClip.id], pipetteOn = pipOn, onPipette = vm::startPipette, onReset = vm::resetChroma,
+                                onChange = vm::updateChroma, onDone = vm::commitFx, onClose = vm::closeMediaTool,
                             )
                         }
                         MediaTool.BG -> {
@@ -348,7 +350,30 @@ private val barEnter = androidx.compose.animation.fadeIn(androidx.compose.animat
 private val barExit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(BaseMotion.EXIT_MS, easing = BaseMotion.EaseOut)) +
     androidx.compose.animation.shrinkVertically(androidx.compose.animation.core.tween(BaseMotion.EXIT_MS, easing = BaseMotion.EaseOut))
 
-private enum class ToolMode { MAIN, MEDIA, AUDIO, TEXT, CAPTION }
+/** Кольцо пипетки на кадре: тянется пальцем, на каждое движение сообщает позицию (доли холста) и размер холста. */
+@Composable
+private fun PipetteOverlay(pos: androidx.compose.ui.geometry.Offset, onMove: (androidx.compose.ui.geometry.Offset, Float, Float) -> Unit) {
+    androidx.compose.foundation.Canvas(
+        Modifier.fillMaxSize()
+            .pointerInput(Unit) { detectTapGestures { p -> onMove(androidx.compose.ui.geometry.Offset(p.x / size.width, p.y / size.height), size.width.toFloat(), size.height.toFloat()) } }
+            .pointerInput(Unit) {
+                detectDragGestures { change, _ ->
+                    change.consume()
+                    onMove(androidx.compose.ui.geometry.Offset((change.position.x / size.width).coerceIn(0f, 1f), (change.position.y / size.height).coerceIn(0f, 1f)), size.width.toFloat(), size.height.toFloat())
+                }
+            },
+    ) {
+        val c = androidx.compose.ui.geometry.Offset(pos.x * size.width, pos.y * size.height)
+        val ring = Color(0xFFEAE6E2)
+        drawCircle(ring, 34.dp.toPx(), c, style = androidx.compose.ui.graphics.drawscope.Stroke(11.dp.toPx()))
+        drawCircle(Color.Black.copy(alpha = .35f), 28.5.dp.toPx(), c, style = androidx.compose.ui.graphics.drawscope.Stroke(1.dp.toPx()))
+        val sq = 4.5.dp.toPx()
+        drawRect(Color.Black, androidx.compose.ui.geometry.Offset(c.x - sq - 1.dp.toPx(), c.y - sq - 1.dp.toPx()), androidx.compose.ui.geometry.Size((sq + 1.dp.toPx()) * 2, (sq + 1.dp.toPx()) * 2))
+        drawRect(Color.White, androidx.compose.ui.geometry.Offset(c.x - sq, c.y - sq), androidx.compose.ui.geometry.Size(sq * 2, sq * 2))
+    }
+}
+
+private enum class ToolMode { MAIN, MEDIA, AUDIO, TEXT, CAPTION, BACKGROUND }
 
 /**
  * Окно предпросмотра. Позиция курсора, «живая» трансформация и пропорции читаются ТОЛЬКО здесь — рекомпозиция
@@ -373,6 +398,9 @@ private fun PreviewStage(
     val clips by vm.clips.collectAsStateWithLifecycle()
     val scrubOn by vm.scrubOverlayOn.collectAsStateWithLifecycle()
     val scrubFrame by vm.scrubFrame.collectAsStateWithLifecycle()
+    val bgSel by vm.canvasBg.collectAsStateWithLifecycle()
+    val pipOn by vm.pipetteOn.collectAsStateWithLifecycle()
+    val pipPos by vm.pipettePos.collectAsStateWithLifecycle()
     val pending = abs(aspectApplied - aspectNow) > 0.002f
 
     Box(modifier.fillMaxWidth().background(Color.Black).clipToBounds(), contentAlignment = Alignment.Center) {
@@ -398,7 +426,11 @@ private fun PreviewStage(
             )
             // кадр под курсором напрямую из файла, пока плеер на паузе догоняет позицию при перемотке
             val sf = scrubFrame
-            if (scrubOn && sf != null) Box(Modifier.fillMaxSize().background(Color.Black)) {
+            if (scrubOn && sf != null) Box(Modifier.fillMaxSize().background(bgSel.argb?.let { Color(it) } ?: Color(0xFF16181D))) {
+                if (bgSel == com.base.editor.core.CanvasBg.BLUR) {
+                    // подложка «размытое видео»: тот же кадр на весь холст, сильно размытый (на Android 12+)
+                    Image(sf.image, null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(28.dp))
+                }
                 Image(
                     sf.image, null, contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                     modifier = Modifier.fillMaxSize().graphicsLayer {
@@ -416,6 +448,7 @@ private fun PreviewStage(
             // свободные жесты: перемещение / масштаб / поворот выделенного клипа или текста
             val target = remember(selected, selText, texts, liveClip, playhead, clips, clipAspects, cropClip) { vm.canvasTarget() }
             CanvasTransformOverlay(aspectNow, target, visibleTexts, vm)
+            if (pipOn) PipetteOverlay(pipPos) { pos, w, h -> vm.movePipette(pos, w, h) }
         }
         // полноэкранный режим: иконка внизу справа; в полноэкранном — ещё Play/Pause и время
         if (fullscreen) {
@@ -532,8 +565,13 @@ private fun ToolRow(content: @Composable RowScope.() -> Unit) {
 /** Ряд кнопок с горизонтальной прокруткой — для панелей, где инструментов больше, чем помещается в экран. */
 @Composable
 private fun ScrollToolRow(content: @Composable RowScope.() -> Unit) {
-    Row(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+    androidx.compose.runtime.CompositionLocalProvider(LocalToolScroll provides true) {
+        Row(Modifier.fillMaxSize().horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically, content = content)
+    }
 }
+
+/** В прокручиваемых рядах кнопки имеют нормальную фиксированную ширину, а не сжимаются по весу. */
+private val LocalToolScroll = androidx.compose.runtime.compositionLocalOf { false }
 
 @Composable
 private fun RoundIcon(icon: ImageVector, desc: String, onClick: () -> Unit, size: androidx.compose.ui.unit.Dp = 44.dp, enabled: Boolean = true) {
@@ -573,7 +611,7 @@ private fun KeyframeButton(hasKey: Boolean, onClick: () -> Unit) {
 @Composable
 private fun RowScope.ToolButton(icon: ImageVector, label: String, onClick: () -> Unit) {
     Column(
-        Modifier.pressable(onClick = onClick).weight(1f).widthIn(min = 60.dp).fillMaxHeight().clip(RoundedCornerShape(12.dp)),
+        Modifier.pressable(onClick = onClick).then(if (LocalToolScroll.current) Modifier.width(72.dp) else Modifier.weight(1f).widthIn(min = 56.dp)).fillMaxHeight().clip(RoundedCornerShape(12.dp)),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center,
     ) {
         Icon(icon, null, tint = Color.White, modifier = Modifier.size(26.dp))

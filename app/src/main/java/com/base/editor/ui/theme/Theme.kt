@@ -19,13 +19,12 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 /**
- * Акцент по рекомендации ui-ux-pro-max: Primary #EC4899 (текст на нём #000000), Secondary #DB2777, Accent #2563EB,
- * Destructive #DC2626. Светлые экраны остаются белыми, как были; редактор — тёмный, как был.
+ * Акцент — прежний бирюзовый (по просьбе); остальные роли по ui-ux-pro-max: Accent #2563EB, Destructive #DC2626. Светлые экраны остаются белыми, как были; редактор — тёмный, как был.
  */
 object BaseColors {
-    val Primary = Color(0xFFEC4899)
+    val Primary = Color(0xFF00CCDD)
     val OnPrimary = Color(0xFF000000)
-    val Secondary = Color(0xFFDB2777)
+    val Secondary = Color(0xFF00A3B3)
     /** Синий акцент: таймлайн и вторичные CTA. */
     val Accent = Color(0xFF2563EB)
     val Destructive = Color(0xFFDC2626)

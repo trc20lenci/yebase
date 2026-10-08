@@ -213,40 +213,54 @@ fun VolumePanel(volume: Float, onChange: (Float) -> Unit, onClose: () -> Unit) {
 
 // ───────────────────────── Хромакей ─────────────────────────
 
+/**
+ * Хромакей: пипетка — кольцо прямо на кадре (двигается пальцем, цвет под центром берётся сразу), два слайдера:
+ * «Интенсивность» (порог схожести цвета) и «Тени» (мягкость края и подавление цветового подсвета).
+ */
 @Composable
 fun ChromaPanel(
-    key: ChromaKey?, onToggle: (Boolean) -> Unit, onChange: ((ChromaKey) -> ChromaKey) -> Unit, onDone: () -> Unit,
-    onPickColor: () -> Unit, onClose: () -> Unit,
+    key: ChromaKey?, pipetteOn: Boolean, onPipette: () -> Unit, onReset: () -> Unit,
+    onChange: ((ChromaKey) -> ChromaKey) -> Unit, onDone: () -> Unit, onClose: () -> Unit,
 ) {
-    Column(Modifier.fillMaxSize().background(PANEL_BG).padding(horizontal = 16.dp, vertical = 8.dp).verticalScroll(rememberScrollState())) {
-        PanelHeader("Хромакей", onClose)
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Text("Убрать цвет", color = Color.White, fontSize = 14.sp, modifier = Modifier.weight(1f))
-            Switch(key != null, onToggle, colors = SwitchDefaults.colors(checkedTrackColor = BaseColors.Primary, checkedThumbColor = Color.Black))
-        }
-        if (key != null) {
-            Spacer(Modifier.height(8.dp))
-            Text("Цвет ключа", color = BaseColors.MutedOnDark, fontSize = 12.sp)
-            Row(Modifier.padding(vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
-                // пипетка: выбор цвета прямо на кадре видео
-                Row(
-                    Modifier.pressable(onClick = onPickColor).clip(RoundedCornerShape(12.dp)).background(BaseColors.DarkSlot).padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(Lucide.Pipette, null, tint = Color.White, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(6.dp))
-                    Text("Пипетка", color = Color.White, fontSize = 13.sp)
-                }
-                Swatch(0xFF00FF00.toInt(), key.color == 0xFF00FF00.toInt()) { onChange { it.copy(color = 0xFF00FF00.toInt()) }; onDone() }
-                Swatch(0xFF0047FF.toInt(), key.color == 0xFF0047FF.toInt()) { onChange { it.copy(color = 0xFF0047FF.toInt()) }; onDone() }
-                Box(Modifier.size(36.dp).clip(CircleShape).background(Color(key.color)).border(2.dp, Color.White, CircleShape))
+    Column(Modifier.fillMaxSize().background(BaseColors.DarkPanel).padding(horizontal = 16.dp, vertical = 6.dp).verticalScroll(rememberScrollState())) {
+        Box(Modifier.fillMaxWidth().height(44.dp)) {
+            Row(
+                Modifier.align(Alignment.CenterStart).pressable(onClick = onReset).clip(RoundedCornerShape(10.dp)).padding(horizontal = 6.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(Lucide.RotateCcw, null, tint = Color.White, modifier = Modifier.size(20.dp)); Spacer(Modifier.width(6.dp))
+                Text("Сброс", color = Color.White, fontSize = 14.sp)
             }
-            LabeledSlider("Чувствительность", key.similarity, { v -> onChange { it.copy(similarity = v) } }, onDone)
-            LabeledSlider("Сглаживание краёв", key.smoothness, { v -> onChange { it.copy(smoothness = v) } }, onDone)
-            Text("Чем заливать убранное", color = BaseColors.MutedOnDark, fontSize = 12.sp)
-            Row(Modifier.padding(top = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                BG_COLORS.forEach { c -> Swatch(c, key.bgColor == c) { onChange { it.copy(bgColor = c) }; onDone() } }
+            Text("Хромакей", color = Color.White, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.align(Alignment.Center))
+            Box(Modifier.align(Alignment.CenterEnd).pressable(onClick = onClose).size(44.dp).clip(CircleShape), contentAlignment = Alignment.Center) {
+                Icon(Lucide.Check, "Готово", tint = Color.White)
             }
         }
+        Column(Modifier.fillMaxWidth().padding(top = 4.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+            Box(
+                Modifier.pressable(onClick = onPipette).size(60.dp).clip(CircleShape).background(BaseColors.DarkSlot)
+                    .border(if (pipetteOn) 2.dp else 1.dp, if (pipetteOn) BaseColors.Primary else Color.White.copy(alpha = .15f), CircleShape),
+                contentAlignment = Alignment.Center,
+            ) { Icon(Lucide.Pipette, null, tint = BaseColors.Primary, modifier = Modifier.size(26.dp)) }
+            Text("Пипетка", color = BaseColors.Primary, fontSize = 12.sp, modifier = Modifier.padding(top = 4.dp))
+            if (key == null) Text("Перетащите кольцо на цвет, который нужно убрать", color = BaseColors.MutedOnDark, fontSize = 11.sp, modifier = Modifier.padding(top = 2.dp))
+        }
+        Spacer(Modifier.height(6.dp))
+        SideSlider("Интенсивность", key?.similarity ?: 0f, key != null, { v -> onChange { it.copy(similarity = v) } }, onDone)
+        SideSlider("Тени", key?.smoothness ?: 0f, key != null, { v -> onChange { it.copy(smoothness = v) } }, onDone)
+    }
+}
+
+/** Подпись слева, ползунок справа — как в панелях CapCut. */
+@Composable
+private fun SideSlider(label: String, value: Float, enabled: Boolean, onChange: (Float) -> Unit, onDone: () -> Unit) {
+    Row(Modifier.fillMaxWidth().height(44.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, color = Color.White.copy(alpha = if (enabled) 1f else .5f), fontSize = 13.sp, modifier = Modifier.width(104.dp))
+        Slider(
+            value, onChange, onValueChangeFinished = onDone, enabled = enabled, valueRange = 0f..1f, modifier = Modifier.weight(1f),
+            colors = SliderDefaults.colors(thumbColor = Color.White, activeTrackColor = BaseColors.Primary, inactiveTrackColor = Color.White.copy(alpha = .18f),
+                disabledThumbColor = Color.White.copy(alpha = .6f), disabledActiveTrackColor = Color.White.copy(alpha = .18f), disabledInactiveTrackColor = Color.White.copy(alpha = .18f)),
+        )
     }
 }
 

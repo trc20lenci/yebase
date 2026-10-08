@@ -8,12 +8,9 @@ import android.net.Uri
 import android.util.Log
 import com.base.editor.core.Clip
 import com.base.editor.core.MediaType
-import com.google.mediapipe.framework.image.BitmapImageBuilder
-import com.google.mediapipe.framework.image.ByteBufferExtractor
-import com.google.mediapipe.tasks.core.BaseOptions
-import com.google.mediapipe.tasks.vision.core.RunningMode
-import com.google.mediapipe.tasks.vision.imagesegmenter.ImageSegmenter
 import kotlinx.coroutines.Dispatchers
+import org.tensorflow.lite.DataType
+import org.tensorflow.lite.Interpreter
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -27,7 +24,7 @@ import kotlin.coroutines.coroutineContext
 import kotlin.math.ceil
 
 /**
- * Удаление фона на устройстве: сегментация силуэта моделью MediaPipe (selfie segmenter, TFLite, ≈250 КБ) по кадрам
+ * Удаление фона на устройстве: сегментация силуэта лёгкой TFLite-моделью (selfie segmenter, ≈250 КБ) через LiteRT по кадрам
  * исходника; маски (12 к/с) пишутся в файл и дальше применяются шейдером [com.base.editor.media.gl.ClipFxEffect].
  * Идея «маска → альфа» та же, что у backgroundremover; сама модель — лёгкая, только для людей.
  * Работает в фоне с прогрессом, отменяется вместе с корутиной.
@@ -41,43 +38,64 @@ class BgRemover(private val context: Context, private val store: MaskStore = Mas
         val spanMs = clip.srcSpanMs
         if (spanMs > MAX_SPAN_MS) throw Failure("Для удаления фона клип должен быть не длиннее ${MAX_SPAN_MS / 1000} с")
         val modelFile = ensureModel()
-        val opts = ImageSegmenter.ImageSegmenterOptions.builder()
-            .setBaseOptions(BaseOptions.builder().setModelAssetBuffer(directBuffer(modelFile)).build())
-            .setRunningMode(RunningMode.IMAGE).setOutputConfidenceMasks(true).setOutputCategoryMask(false).build()
-        val segmenter = ImageSegmenter.createFromOptions(context, opts)
+        val interpreter = Interpreter(directBuffer(modelFile), Interpreter.Options().setNumThreads(4))
         val retriever = if (clip.type == MediaType.VIDEO) MediaMetadataRetriever().also { it.setDataSource(context, Uri.parse(clip.uri)) } else null
         val part = File(store.file(clip.uri).path + ".part").apply { delete() }
         try {
+            // форма входа/выхода читается из самой модели: [1, H, W, 3] → [1, H, W, C]
+            val inShape = interpreter.getInputTensor(0).shape()
+            val outShape = interpreter.getOutputTensor(0).shape()
+            val inH = inShape[1]; val inW = inShape[2]
+            val outH = outShape[1]; val outW = outShape[2]; val outC = if (outShape.size > 3) outShape[3] else 1
+            val floatInput = interpreter.getInputTensor(0).dataType() == DataType.FLOAT32
+            val input = ByteBuffer.allocateDirect(inW * inH * 3 * (if (floatInput) 4 else 1)).order(ByteOrder.nativeOrder())
+            val output = ByteBuffer.allocateDirect(outW * outH * outC * 4).order(ByteOrder.nativeOrder())
+            val pixels = IntArray(inW * inH)
             val count = if (clip.type == MediaType.IMAGE) 1 else ceil(spanMs * FPS / 1000.0).toInt() + 1
-            var w = 0; var h = 0; var invert: Boolean? = null
+            var invert: Boolean? = null
             RandomAccessFile(part, "rw").use { out ->
+                out.write(ByteArray(MaskStore.HEADER.toInt()))                           // заголовок допишем в конце
                 for (i in 0 until count) {
                     coroutineContext.ensureActive()
                     val srcMs = clip.srcInMs + (i * 1000L / FPS)
                     val bmp = frame(clip, retriever, srcMs) ?: throw Failure("Не удалось прочитать кадр")
-                    val res = segmenter.segment(BitmapImageBuilder(bmp).build())
-                    val masks = res.confidenceMasks().orElse(null) ?: throw Failure("Модель не вернула маску")
-                    val m = masks[if (masks.size >= 2) 1 else 0]
-                    if (i == 0) {
-                        w = m.width; h = m.height
-                        out.write(ByteArray(MaskStore.HEADER.toInt()))                       // заголовок допишем в конце
+                    val scaled = Bitmap.createScaledBitmap(bmp, inW, inH, true)
+                    scaled.getPixels(pixels, 0, inW, 0, 0, inW, inH)
+                    input.rewind()
+                    for (px in pixels) {
+                        val r = (px shr 16) and 0xFF; val g = (px shr 8) and 0xFF; val b = px and 0xFF
+                        if (floatInput) { input.putFloat(r / 255f); input.putFloat(g / 255f); input.putFloat(b / 255f) }
+                        else { input.put(r.toByte()); input.put(g.toByte()); input.put(b.toByte()) }
                     }
-                    val fb = ByteBufferExtractor.extract(m).order(ByteOrder.nativeOrder()).asFloatBuffer()
-                    val bytes = ByteArray(w * h)
-                    for (k in bytes.indices) bytes[k] = (fb.get(k).coerceIn(0f, 1f) * 255f).toInt().toByte()
-                    if (invert == null) invert = borderMean(bytes, w, h) > centerMean(bytes, w, h) + 20     // модель вернула «фон», а не «человек»
+                    input.rewind(); output.rewind()
+                    interpreter.run(input, output)
+                    output.rewind()
+                    val fb = output.asFloatBuffer()
+                    val bytes = ByteArray(outW * outH)
+                    var mn = Float.MAX_VALUE; var mx = -Float.MAX_VALUE
+                    for (k in 0 until outW * outH * outC) { val v = fb.get(k); if (v < mn) mn = v; if (v > mx) mx = v }
+                    val logits = mn < -0.01f || mx > 1.01f
+                    for (k in bytes.indices) {
+                        val v = if (outC == 1) fb.get(k) else {
+                            val bgV = fb.get(k * outC); val fgV = fb.get(k * outC + 1)       // канал 1 — «человек»
+                            if (logits) 1f / (1f + kotlin.math.exp(bgV - fgV)) else fgV
+                        }
+                        val p = if (outC == 1 && logits) 1f / (1f + kotlin.math.exp(-v)) else v
+                        bytes[k] = (p.coerceIn(0f, 1f) * 255f).toInt().toByte()
+                    }
+                    if (invert == null) invert = borderMean(bytes, outW, outH) > centerMean(bytes, outW, outH) + 20     // модель вернула «фон»
                     if (invert == true) for (k in bytes.indices) bytes[k] = (255 - (bytes[k].toInt() and 0xFF)).toByte()
                     out.write(bytes)
                     onProgress((i + 1f) / count)
                 }
                 val header = ByteBuffer.allocate(MaskStore.HEADER.toInt()).order(ByteOrder.BIG_ENDIAN)
-                header.putInt(MaskStore.MAGIC).putInt(w).putInt(h).putInt(FPS).putLong(clip.srcInMs).putInt(count)
+                header.putInt(MaskStore.MAGIC).putInt(outW).putInt(outH).putInt(FPS).putLong(clip.srcInMs).putInt(count)
                 out.seek(0); out.write(header.array())
             }
             val target = store.file(clip.uri); target.delete()
             if (!part.renameTo(target)) throw Failure("Не удалось сохранить маски")
         } finally {
-            part.delete(); runCatching { retriever?.release() }; runCatching { segmenter.close() }
+            part.delete(); runCatching { retriever?.release() }; runCatching { interpreter.close() }
         }
     }
 

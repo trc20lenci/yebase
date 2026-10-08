@@ -146,6 +146,37 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     fun openExportSheet() { controller.pause(); exportSheetOpen.value = true }
     fun closeExportSheet() { exportSheetOpen.value = false }
 
+    // ───────── фон холста ─────────
+    val canvasBg = MutableStateFlow(com.base.editor.core.CanvasBg.BLACK)
+    val bgBarOpen = MutableStateFlow(false)
+    fun openBgBar() { controller.pause(); select(null); formatPanelOpen.value = false; captionPanelOpen.value = false; bgBarOpen.value = true }
+    fun closeBgBar() { bgBarOpen.value = false }
+    fun setCanvasBg(b: com.base.editor.core.CanvasBg) {
+        if (b == canvasBg.value) return
+        snapshotWhileRebuilding(); canvasBg.value = b; controller.setCanvasBg(b); persist()
+    }
+
+    private var snapshotJob: kotlinx.coroutines.Job? = null
+    /**
+     * Смена формата/фона требует пересборки композиции (несколько секунд). Чтобы картинка не «сжималась и приходила в
+     * себя», на это время поверх плеера показывается текущий кадр (вписанный в НОВУЮ рамку), и снимается он, когда
+     * плеер показал новую композицию.
+     */
+    private fun snapshotWhileRebuilding() {
+        val t = playheadMs.value
+        val clip = clips.value.firstOrNull { it.row == 0 && it.type != com.base.editor.core.MediaType.AUDIO && t >= it.startMs && t < it.endMs } ?: return
+        val local = t - clip.startMs
+        scrubHideJob?.cancel(); scrubOverlayOn.value = true
+        scrubFrames.request(clip, local, true, controller.state.value.transformAt(clip.id, local), controller.cropOf(clip.id))
+        val v0 = controller.appliedVersion.value
+        snapshotJob?.cancel()
+        snapshotJob = viewModelScope.launch {
+            kotlinx.coroutines.withTimeoutOrNull(9000) { controller.appliedVersion.first { it > v0 } }
+            controller.awaitSeekSettled(2500)
+            scrubOverlayOn.value = false; scrubFrames.clear()
+        }
+    }
+
     // ───────── живой предпросмотр при скраббинге ─────────
     private val scrubFrames = com.base.editor.media.ScrubFrames(app, viewModelScope)
     val scrubFrame = scrubFrames.frame
@@ -167,6 +198,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
             val saved = repo.loadTimeline(projectId)
             controller.load(saved)
             format.value = com.base.editor.core.CanvasFormat.of(repo.loadFormat(projectId))
+            canvasBg.value = com.base.editor.core.CanvasBg.of(repo.loadBg(projectId)); controller.setCanvasBg(canvasBg.value)
             captions.load(repo.loadCaptions(projectId))
             controller.loadTexts(repo.loadTexts(projectId))
             withContext(dispatchers.default) { detectAspect() }      // чтение метаданных — не на главном потоке
@@ -199,8 +231,8 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     }
 
     /** Формат холста: пресет или пропорции первого клипа («Оригинал»). Влияет и на превью, и на экспорт (aspect → canvasFor). */
-    fun setFormat(f: com.base.editor.core.CanvasFormat) { format.value = f; applyCanvas(); persist() }
-    fun openFormat() { controller.pause(); selectedId.value = null; transitionFor.value = null; captionPanelOpen.value = false; formatPanelOpen.value = true }
+    fun setFormat(f: com.base.editor.core.CanvasFormat) { snapshotWhileRebuilding(); format.value = f; applyCanvas(); persist() }
+    fun openFormat() { controller.pause(); selectedId.value = null; transitionFor.value = null; captionPanelOpen.value = false; bgBarOpen.value = false; formatPanelOpen.value = true }
     fun closeFormat() { formatPanelOpen.value = false }
 
     private fun shortSide() = when (resolution.value) { "480p" -> 480; "1080p" -> 1080; else -> 720 }
@@ -211,7 +243,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         val data = controller.serialize(); val clips = controller.state.value.clips
         val cap = captions.toJson(); val txt = controller.serializeTexts()
         val fmt = format.value.id
-        persistScope.launch { repo.save(projectId, data, clips, cap, txt, fmt) }
+        persistScope.launch { repo.save(projectId, data, clips, cap, txt, fmt, canvasBg.value.id) }
     }
     fun saveNow() = persist()
 
@@ -265,6 +297,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     /** Выделение одно на весь редактор: клип/аудио, текстовый слой или карточка субтитров. null — снять всё. */
     override fun select(id: Long?) {
         selectedId.value = id; canvasTextId.value = null; selectedCaptionId.value = null; textSub.value = null
+        bgBarOpen.value = false; pipetteOn.value = false
     }
     override fun editBegin() = controller.beginEdit()
     override fun moveClip(id: Long, startMs: Long) = controller.move(id, startMs, (8f / pxPerSec.value * 1000).toLong())
@@ -339,12 +372,9 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     fun closeCaptions() { captionPanelOpen.value = false; editingCaptionId.value = null }
     fun openCaptionItem(c: CaptionItem) { controller.pause(); controller.seekTo(c.startMs); editingCaptionId.value = c.id }
     fun addCaptionHere() { editingCaptionId.value = captions.addAt(playheadMs.value) }
-    val captionLanguage = MutableStateFlow(com.base.editor.captions.CaptionLanguage.AUTO)
-    fun setCaptionLanguage(l: com.base.editor.captions.CaptionLanguage) { captionLanguage.value = l }
-
     fun generateCaptions() {
         if (controller.state.value.clips.none { it.type == com.base.editor.core.MediaType.VIDEO }) { events.value = "Нужен хотя бы один видеоклип со звуком"; return }
-        controller.pause(); captions.generate(controller.state.value, captionLanguage.value)
+        controller.pause(); captions.generate(controller.state.value)
     }
 
     // ───────── кадрирование ─────────
@@ -411,7 +441,10 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
             "speed" -> { select(first.id); openMediaTool(MediaTool.SPEED) }
         }
     }
-    init { runPendingTool() }
+    init {
+        runPendingTool()
+        com.base.editor.media.gl.FxDiagnostics.listener = { msg -> events.value = msg }
+    }
 
     val selectedClip get() = selectedId.value?.let { id -> clips.value.firstOrNull { it.id == id } }
 
@@ -420,31 +453,78 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         if (c.type == com.base.editor.core.MediaType.IMAGE && (t == MediaTool.SPEED || t == MediaTool.VOLUME)) { events.value = "Для фото это недоступно"; return }
         if (c.type == com.base.editor.core.MediaType.AUDIO && (t == MediaTool.CHROMA || t == MediaTool.BG)) { events.value = "Для звука это недоступно"; return }
         controller.pause(); mediaTool.value = t
+        if (t == MediaTool.CHROMA) startPipette() else pipetteOn.value = false
     }
-    fun closeMediaTool() { controller.commitFxEdit(); mediaTool.value = null; colorPickOpen.value = false }
+    fun closeMediaTool() { controller.commitFxEdit(); mediaTool.value = null; colorPickOpen.value = false; pipetteOn.value = false }
 
     fun setClipSpeed(v: Float) { selectedId.value?.let { controller.setSpeed(it, v) } }
     fun setClipVolume(v: Float) { selectedId.value?.let { controller.setVolume(it, v) } }
 
     fun chromaOfSelected() = selectedId.value?.let { controller.state.value.chromas[it] }
-    fun toggleChroma(on: Boolean) { selectedId.value?.let { controller.setChroma(it, if (on) com.base.editor.core.ChromaKey() else null, rebuild = true) } }
     fun updateChroma(f: (com.base.editor.core.ChromaKey) -> com.base.editor.core.ChromaKey) {
         val id = selectedId.value ?: return
         val cur = controller.state.value.chromas[id] ?: return
         controller.setChroma(id, f(cur), rebuild = false)
     }
+    fun resetChroma() {
+        val id = selectedId.value ?: return
+        controller.setChroma(id, null, rebuild = true)
+        pipettePos.value = androidx.compose.ui.geometry.Offset(0.5f, 0.5f)
+    }
     fun commitFx() = controller.commitFxEdit()
 
-    // пипетка: кадр показываем без обрезки/эффектов, цвет берём по касанию
-    val pickFrame = MutableStateFlow<androidx.compose.ui.graphics.ImageBitmap?>(null)
-    fun openColorPicker() {
+    // ───────── пипетка: кольцо на самом кадре, цвет берётся под его центром ─────────
+    val pipetteOn = MutableStateFlow(false)
+    val pipettePos = MutableStateFlow(androidx.compose.ui.geometry.Offset(0.5f, 0.5f))      // доли холста
+    private var pipetteFrame: android.graphics.Bitmap? = null
+    private var pipetteFrameClip = -1L
+
+    fun startPipette() {
         val clip = selectedClip ?: return
-        pickFrame.value = null; colorPickOpen.value = true
+        pipetteOn.value = true
+        if (pipetteFrameClip == clip.id && pipetteFrame != null) return
         val local = (playheadMs.value - clip.startMs).coerceIn(0L, (clip.endMs - clip.startMs).coerceAtLeast(0L))
-        viewModelScope.launch(Dispatchers.IO) { pickFrame.value = runCatching { loadFrame(clip, (local * clip.speed).toLong()) }.getOrNull()?.asImageBitmap() }
+        viewModelScope.launch(Dispatchers.IO) {
+            val bmp = runCatching { loadFrame(clip, (local * clip.speed).toLong()) }.getOrNull() ?: return@launch
+            val c = controller.cropOf(clip.id)
+            pipetteFrame = if (c.isFull) bmp else android.graphics.Bitmap.createBitmap(bmp,
+                (c.left * bmp.width).toInt().coerceIn(0, bmp.width - 1), (c.top * bmp.height).toInt().coerceIn(0, bmp.height - 1),
+                (c.width * bmp.width).toInt().coerceIn(1, bmp.width), (c.height * bmp.height).toInt().coerceIn(1, bmp.height))
+            pipetteFrameClip = clip.id
+        }
     }
-    fun pickChromaColor(argb: Int) { updateChroma { it.copy(color = argb or (0xFF shl 24)) }; commitFx(); colorPickOpen.value = false }
-    fun cancelColorPicker() { colorPickOpen.value = false }
+    fun stopPipette() { pipetteOn.value = false }
+
+    /** Кольцо пипетки сдвинуто в [pos] (доли холста): берём цвет кадра под центром и сразу применяем как ключ. */
+    fun movePipette(pos: androidx.compose.ui.geometry.Offset, canvasW: Float, canvasH: Float) {
+        pipettePos.value = pos
+        val clip = selectedClip ?: return
+        val bmp = pipetteFrame ?: return
+        val local = (playheadMs.value - clip.startMs).coerceAtLeast(0L)
+        val t = controller.state.value.transformAt(clip.id, local)
+        // обратное преобразование: холст → кадр (сдвиг, поворот, масштаб относительно центра, вписывание Fit)
+        var cx = (pos.x - 0.5f) * canvasW - t.x * canvasW
+        var cy = (pos.y - 0.5f) * canvasH - t.y * canvasH
+        val rad = Math.toRadians(-t.rotationDeg.toDouble())
+        val rx = ((cx * Math.cos(rad) - cy * Math.sin(rad)) / t.scale).toFloat()
+        val ry = ((cx * Math.sin(rad) + cy * Math.cos(rad)) / t.scale).toFloat()
+        val ac = canvasW / canvasH; val af = bmp.width.toFloat() / bmp.height
+        val fw = if (af >= ac) canvasW else canvasH * af
+        val fh = if (af >= ac) canvasW / af else canvasH
+        val u = rx / fw + 0.5f; val v = ry / fh + 0.5f
+        if (u < 0f || u > 1f || v < 0f || v > 1f) return                       // кольцо над полем — цвет не берём
+        val px = (u * bmp.width).toInt().coerceIn(0, bmp.width - 1); val py = (v * bmp.height).toInt().coerceIn(0, bmp.height - 1)
+        var r = 0; var g = 0; var b = 0; var n = 0
+        for (dy in -2..2) for (dx in -2..2) {
+            val c = bmp.getPixel((px + dx).coerceIn(0, bmp.width - 1), (py + dy).coerceIn(0, bmp.height - 1))
+            r += android.graphics.Color.red(c); g += android.graphics.Color.green(c); b += android.graphics.Color.blue(c); n++
+        }
+        val argb = android.graphics.Color.rgb(r / n, g / n, b / n)
+        val id = clip.id
+        val cur = controller.state.value.chromas[id]
+        if (cur == null) controller.setChroma(id, com.base.editor.core.ChromaKey(color = argb), rebuild = true)       // включается при первом выборе цвета
+        else controller.setChroma(id, cur.copy(color = argb), rebuild = false)
+    }
 
     fun bgMaskReady() = selectedClip?.let { maskStore.has(it.uri) } == true
     fun bgOfSelected() = selectedId.value?.let { controller.state.value.bgs[it] }
@@ -462,7 +542,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
                 controller.setBg(clip.id, controller.state.value.bgs[clip.id] ?: com.base.editor.core.BgRemoval(), rebuild = true)
             } catch (e: kotlinx.coroutines.CancellationException) { throw e
             } catch (e: com.base.editor.media.BgRemover.Failure) { events.value = e.message
-            } catch (e: Exception) { android.util.Log.e("BaseBg", "удаление фона", e); events.value = "Не удалось удалить фон на этом устройстве"
+            } catch (e: Exception) { android.util.Log.e("BaseBg", "удаление фона", e); events.value = "Не удалось удалить фон: ${e.javaClass.simpleName}: ${e.message?.take(90)}"
             } finally { bgJob.value = null }
         }
     }
@@ -531,7 +611,8 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
             val applied = controller.appliedVersion.value
             controller.commitTransformEdit()
             viewModelScope.launch {
-                val deadline = System.currentTimeMillis() + 1000
+                // кадр-подмена держится, пока плеер реально не покажет новое положение (а не фиксированное время)
+                val deadline = System.currentTimeMillis() + 5000
                 while (controller.appliedVersion.value == applied && System.currentTimeMillis() < deadline) delay(40)
                 liveClipTransform.value = null
                 scrubOverlayOn.value = false; scrubFrames.clear()
@@ -649,7 +730,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         if (exportJob?.isActive == true) return
         controller.pause()
         val track = captions.items.value.takeIf { it.isNotEmpty() }?.let { CaptionTrack(it, captions.style.value) }
-        val request = ExportRequest(controller.state.value, aspect, quality, fps = exportFps.value, removeAudio = muted.value, captions = track, texts = controller.texts.value)
+        val request = ExportRequest(controller.state.value, aspect, quality, fps = exportFps.value, canvasBg = canvasBg.value, removeAudio = muted.value, captions = track, texts = controller.texts.value)
         exportJob = viewModelScope.launch {
             exporter.export(request).collect { s ->
                 exportState.value = s
@@ -666,6 +747,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     fun dismissExport() { exportState.value = null }
 
     override fun onCleared() {
+        com.base.editor.media.gl.FxDiagnostics.listener = null
         scrubFrames.release()
         captions.cancelGeneration()
         persist()
