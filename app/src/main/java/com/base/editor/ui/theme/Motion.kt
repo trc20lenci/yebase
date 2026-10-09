@@ -52,8 +52,9 @@ fun rememberReducedMotion(): Boolean {
  * Стандартная «рябь» отключена: собственный отклик заметнее и не перекрывается фоном.
  */
 fun Modifier.pressable(
-    enabled: Boolean = true, role: Role? = null, pressedScale: Float = BaseMotion.PRESS_SCALE, onClick: () -> Unit,
+    enabled: Boolean = true, role: Role? = null, pressedScale: Float = BaseMotion.PRESS_SCALE, haptic: Boolean = true, onClick: () -> Unit,
 ): Modifier = composed {
+    val view = androidx.compose.ui.platform.LocalView.current
     val source = remember { MutableInteractionSource() }
     val pressed by source.collectIsPressedAsState()
     val reduced = rememberReducedMotion()
@@ -64,7 +65,10 @@ fun Modifier.pressable(
     this
         .graphicsLayer { scaleX = scale; scaleY = scale }
         .alpha(if (pressed && enabled) 0.88f else 1f)
-        .clickable(interactionSource = source, indication = null, enabled = enabled, role = role, onClick = onClick)
+        .clickable(interactionSource = source, indication = null, enabled = enabled, role = role) {
+            if (haptic) view.haptic(Haptic.LIGHT)          // лёгкий отклик на нажатие любой кнопки
+            onClick()
+        }
 }
 
 private const val STAGGER_MAX_ITEMS = 10

@@ -5,6 +5,7 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import com.base.editor.ui.theme.BaseMotion
+import com.base.editor.ui.theme.haptic
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectDragGestures
@@ -161,6 +162,8 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     val pagTemplates by vm.pagTemplates.collectAsStateWithLifecycle()
 
     SideEffect { vm.onRequestAddMedia = onAddMedia }
+    val hapticView = androidx.compose.ui.platform.LocalView.current
+    LaunchedEffect(Unit) { com.base.editor.ui.theme.HapticBus.events.collect { hapticView.haptic(it) } }
     // выбор музыки с устройства (MIME audio/*) — результат уходит во ViewModel
     val audioPicker = androidx.activity.compose.rememberLauncherForActivityResult(
         androidx.activity.result.contract.ActivityResultContracts.OpenDocument()

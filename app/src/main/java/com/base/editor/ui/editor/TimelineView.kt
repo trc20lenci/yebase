@@ -54,6 +54,8 @@ import com.base.editor.core.Transition
 import com.base.editor.data.Format
 import com.base.editor.data.Thumbs
 import com.base.editor.ui.theme.BaseColors
+import com.base.editor.ui.theme.haptic
+import com.base.editor.ui.theme.Haptic
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -99,6 +101,7 @@ fun TimelineView(
     }
 
     val flingRef = remember { arrayOfNulls<Job>(1) }
+    val view = androidx.compose.ui.platform.LocalView.current
 
     Canvas(
         modifier.fillMaxWidth().height(TL_HEIGHT_DP.dp)
@@ -128,6 +131,7 @@ fun TimelineView(
                     val selectedBlock = (hit is Hit.Text && hit.id == s0.selectedTextId) || (hit is Hit.Caption && hit.id == s0.selectedCaptionId)
                     if (selectedBlock) {
                         val pressed = awaitLongPressOrCancellation(down.id)
+                        if (pressed != null) view.haptic(Haptic.LONG)
                         if (pressed != null) {
                             val baseStart = when (hit) {
                                 is Hit.Text -> s0.texts.firstOrNull { it.id == hit.id }?.startMs
@@ -180,6 +184,7 @@ fun TimelineView(
                                 is Hit.Body -> if (hit.clip.id == s0.selectedId) Mode.MOVE else Mode.SCROLL
                                 else -> Mode.SCROLL
                             }
+                            if (mode != Mode.SCROLL) view.haptic(Haptic.LIGHT)               // схватили блок/ручку
                             when (mode) {
                                 Mode.SCROLL -> act.scrubStart()
                                 Mode.TRIM_T_START, Mode.TRIM_T_END -> s0.texts.firstOrNull { it.id == (hit as Hit.TextHandle).id }?.let { baseS = it.startMs; baseE = it.endMs }
@@ -212,7 +217,7 @@ fun TimelineView(
                             val vMs = -tracker.calculateVelocity().x / cur.geo.pxPerMs
                             flingRef[0] = scope.launch {
                                 try {
-                                    animateDecay(ph.toFloat(), vMs.toFloat(), FloatExponentialDecaySpec(frictionMultiplier = 1.6f)) { v, _ ->
+                                    animateDecay(ph.toFloat(), vMs.toFloat(), FloatExponentialDecaySpec(frictionMultiplier = 0.8f)) { v, _ ->
                                         ph = v.toDouble().coerceIn(0.0, cur.totalMs.toDouble())
                                         act.scrubTo(ph.toLong())
                                     }

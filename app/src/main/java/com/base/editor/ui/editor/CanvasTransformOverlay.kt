@@ -13,6 +13,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
+import com.base.editor.ui.theme.haptic
+import com.base.editor.ui.theme.Haptic
+import com.base.editor.ui.theme.BaseColors
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -71,6 +77,14 @@ fun CanvasTransformOverlay(
     val currentTarget by rememberUpdatedState(target)
     val currentTexts by rememberUpdatedState(texts)
     val act by rememberUpdatedState(actions)
+    val view = androidx.compose.ui.platform.LocalView.current
+    // привязка к центру: линии показываются, пока элемент тянут, и мигают, когда он «встал» ровно по центру
+    var dragging by remember { mutableStateOf(false) }
+    var snapX by remember { mutableStateOf(false) }
+    var snapY by remember { mutableStateOf(false) }
+    val blink by androidx.compose.animation.core.rememberInfiniteTransition(label = "snapBlink").animateFloat(
+        0.35f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(380), androidx.compose.animation.core.RepeatMode.Reverse), label = "blink",
+    )
 
     Box(modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         Canvas(
@@ -80,6 +94,7 @@ fun CanvasTransformOverlay(
                     var transforming = false
                     var accPan = Offset.Zero; var accZoom = 1f; var accRot = 0f
                     var base: CanvasTarget? = null                 // состояние элемента на момент начала жеста
+                    var rotSnapped = false
                     do {
                         val event = awaitPointerEvent()
                         val pan = event.calculatePan(); val zoom = event.calculateZoom(); val rot = event.calculateRotation()
@@ -92,24 +107,38 @@ fun CanvasTransformOverlay(
                         val b = base
                         if (transforming && b != null && event.changes.any { it.pressed }) {
                             val w = size.width.toFloat(); val h = size.height.toFloat()
+                            dragging = true
+                            // порог притяжения к центру: ~10 dp, плюс «липкий» поворот к 0/90/180/270 в пределах 3°
+                            val tx = 10.dp.toPx() / w; val ty = 10.dp.toPx() / h
+                            fun nearRight(raw: Float): Float { val k = Math.round(raw / 90f) * 90f; return if (abs(raw - k) < 3f) k else raw }
                             when (b) {
                                 // как в MultiTouchListener: от исходного состояния + суммарная дельта жеста
-                                is CanvasTarget.Clip -> act.onClipTransform(b.id, b.transform.copy(
-                                    x = b.transform.x + accPan.x / w, y = b.transform.y + accPan.y / h,
-                                    scale = b.transform.scale * accZoom, rotationDeg = b.transform.rotationDeg + accRot,
-                                ).sane())
-                                is CanvasTarget.Text -> act.onTextTransform(b.clip.copy(
-                                    positionX = (b.clip.positionX + accPan.x / w).coerceIn(-0.2f, 1.2f),
-                                    positionY = (b.clip.positionY + accPan.y / h).coerceIn(-0.2f, 1.2f),
-                                    fontSizeSp = (b.clip.fontSizeSp * accZoom).coerceIn(8f, 160f),
-                                    rotationDeg = b.clip.rotationDeg + accRot,
-                                ), b.isDraft)
+                                is CanvasTarget.Clip -> {
+                                    var nx = b.transform.x + accPan.x / w; var ny = b.transform.y + accPan.y / h
+                                    val sx = abs(nx) < tx; val sy = abs(ny) < ty
+                                    if (sx) nx = 0f; if (sy) ny = 0f
+                                    val rawRot = b.transform.rotationDeg + accRot
+                                    val rot = nearRight(rawRot); val rs = rot != rawRot
+                                    if ((sx && !snapX) || (sy && !snapY) || (rs && !rotSnapped)) view.haptic(Haptic.SNAP)
+                                    snapX = sx; snapY = sy; rotSnapped = rs
+                                    act.onClipTransform(b.id, b.transform.copy(x = nx, y = ny, scale = b.transform.scale * accZoom, rotationDeg = rot).sane())
+                                }
+                                is CanvasTarget.Text -> {
+                                    var px = (b.clip.positionX + accPan.x / w).coerceIn(-0.2f, 1.2f); var py = (b.clip.positionY + accPan.y / h).coerceIn(-0.2f, 1.2f)
+                                    val sx = abs(px - 0.5f) < tx; val sy = abs(py - 0.5f) < ty
+                                    if (sx) px = 0.5f; if (sy) py = 0.5f
+                                    val rawRot = b.clip.rotationDeg + accRot
+                                    val rot = nearRight(rawRot); val rs = rot != rawRot
+                                    if ((sx && !snapX) || (sy && !snapY) || (rs && !rotSnapped)) view.haptic(Haptic.SNAP)
+                                    snapX = sx; snapY = sy; rotSnapped = rs
+                                    act.onTextTransform(b.clip.copy(positionX = px, positionY = py, fontSizeSp = (b.clip.fontSizeSp * accZoom).coerceIn(8f, 160f), rotationDeg = rot), b.isDraft)
+                                }
                             }
                             event.changes.forEach { it.consume() }
                         }
                     } while (event.changes.any { it.pressed })
 
-                    if (transforming) act.onGestureEnd()
+                    if (transforming) { act.onGestureEnd(); dragging = false; snapX = false; snapY = false }
                     else {
                         // тап: сверху вниз ищем текстовый слой под пальцем, иначе — видео
                         val hit = hitText(measurer, currentTexts, down.position, Size(size.width.toFloat(), size.height.toFloat()), this)
@@ -118,6 +147,15 @@ fun CanvasTransformOverlay(
                 }
             },
         ) {
+            if (dragging) {
+                val dash = androidx.compose.ui.graphics.PathEffect.dashPathEffect(floatArrayOf(10.dp.toPx(), 8.dp.toPx()))
+                val on = BaseColors.Primary
+                // вертикальная и горизонтальная линии по центру; когда элемент «встал» ровно — линия яркая и мигает
+                drawLine(on.copy(alpha = if (snapX) blink else 0.28f), Offset(size.width / 2, 0f), Offset(size.width / 2, size.height),
+                    strokeWidth = if (snapX) 2.dp.toPx() else 1.dp.toPx(), pathEffect = if (snapX) null else dash)
+                drawLine(on.copy(alpha = if (snapY) blink else 0.28f), Offset(0f, size.height / 2), Offset(size.width, size.height / 2),
+                    strokeWidth = if (snapY) 2.dp.toPx() else 1.dp.toPx(), pathEffect = if (snapY) null else dash)
+            }
             val t = target ?: return@Canvas
             when (t) {
                 is CanvasTarget.Text -> measureBox(measurer, t.clip)?.let { b ->

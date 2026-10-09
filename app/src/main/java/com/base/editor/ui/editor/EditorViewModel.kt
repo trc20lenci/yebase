@@ -11,6 +11,8 @@ import com.base.editor.captions.CaptionManager
 import com.base.editor.data.PickedMediaInbox
 import com.base.editor.pag.PagTemplateStore
 import com.base.editor.text.TextAnimation
+import com.base.editor.ui.theme.Haptic
+import com.base.editor.ui.theme.HapticBus
 import com.base.editor.text.TextAnimator
 import com.base.editor.text.TextClip
 import com.base.editor.text.TextStyles
@@ -258,8 +260,23 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
 
     // ───────── TimelineActions ─────────
     override fun scrubStart() = controller.pause()
+    private var lastTickBucket = -1L
+    private var lastClipBucket = -1
+    private var lastTickAt = 0L
+    /** Мягкие «щелчки» при ведении по таймлайну: каждая секунда — лёгкий тик, граница клипа — чёткий, но не чаще ~22 раз/с. */
+    private fun scrubHaptics(t: Long) {
+        val now = android.os.SystemClock.uptimeMillis()
+        val clipB = clips.value.count { it.row == 0 && it.startMs <= t }
+        if (lastClipBucket != -1 && clipB != lastClipBucket) { HapticBus.emit(Haptic.SNAP); lastTickAt = now }
+        lastClipBucket = clipB
+        val b = t / 1000
+        if (lastTickBucket != -1L && b != lastTickBucket && now - lastTickAt > 45) { HapticBus.emit(Haptic.TICK); lastTickAt = now }
+        lastTickBucket = b
+    }
+
     override fun scrubTo(ms: Long) {
         val t = snapToKeyframe(ms)
+        scrubHaptics(t)
         controller.scrubTo(t)
         scrubPreview(t, exact = false)
     }
@@ -301,6 +318,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     override fun select(id: Long?) {
         selectedId.value = id; canvasTextId.value = null; selectedCaptionId.value = null; textSub.value = null
         bgBarOpen.value = false; pipetteOn.value = false
+        if (id != null) HapticBus.emit(Haptic.SELECT)
     }
     override fun editBegin() = controller.beginEdit()
     override fun moveClip(id: Long, startMs: Long) = controller.move(id, startMs, (8f / pxPerSec.value * 1000).toLong())
@@ -343,10 +361,10 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
 
     fun split() {
         val id = selectedId.value ?: return
-        if (!controller.split(id)) events.value = "Поставьте курсор внутрь клипа"
+        if (!controller.split(id)) { events.value = "Поставьте курсор внутрь клипа"; HapticBus.emit(Haptic.ERROR) } else HapticBus.emit(Haptic.SUCCESS)
     }
 
-    fun deleteSelected() { selectedId.value?.let { controller.remove(it); selectedId.value = null } }
+    fun deleteSelected() { HapticBus.emit(Haptic.SUCCESS); selectedId.value?.let { controller.remove(it); selectedId.value = null } }
 
     fun selectAtPlayhead() {
         val t = playheadMs.value
@@ -664,6 +682,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     /** Тап по текстовому блоку (таймлайн или холст): выделение → в слоте инструментов появляется панель текста. Плеер не трогаем. */
     override fun openText(id: String) {
         if (controller.findText(id) == null) return
+        HapticBus.emit(Haptic.SELECT)
         selectedId.value = null; selectedCaptionId.value = null; captionPanelOpen.value = false; textSub.value = null
         canvasTextId.value = id
     }
@@ -671,6 +690,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     /** Тап по блоку субтитров: выделение карточки; панель инструментов субтитров появляется в слоте. */
     override fun openCaption(id: String) {
         if (captions.items.value.none { it.id == id }) return
+        HapticBus.emit(Haptic.SELECT)
         selectedId.value = null; canvasTextId.value = null; textSub.value = null
         selectedCaptionId.value = id
     }
@@ -704,18 +724,19 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         if (at < c.startMs + TextClip.MIN_DURATION_MS || at > c.endMs - TextClip.MIN_DURATION_MS) {
             events.value = "Поставьте курсор внутрь блока"; return
         }
+        HapticBus.emit(Haptic.SUCCESS)
         controller.updateText(c.copy(durationMs = at - c.startMs))
         val right = c.copy(id = java.util.UUID.randomUUID().toString(), startMs = at, durationMs = c.endMs - at)
         controller.addText(right)
         canvasTextId.value = right.id
     }
-    fun deleteText() { canvasTextId.value?.let(controller::removeText); canvasTextId.value = null; textSub.value = null }
+    fun deleteText() { HapticBus.emit(Haptic.SUCCESS); canvasTextId.value?.let(controller::removeText); canvasTextId.value = null; textSub.value = null }
 
     fun splitCaption() {
         val id = selectedCaptionId.value ?: return
-        if (!captions.split(id, playheadMs.value)) events.value = "Поставьте курсор внутрь карточки"
+        if (!captions.split(id, playheadMs.value)) { events.value = "Поставьте курсор внутрь карточки"; HapticBus.emit(Haptic.ERROR) } else HapticBus.emit(Haptic.SUCCESS)
     }
-    fun deleteCaption() { selectedCaptionId.value?.let(captions::delete); selectedCaptionId.value = null }
+    fun deleteCaption() { HapticBus.emit(Haptic.SUCCESS); selectedCaptionId.value?.let(captions::delete); selectedCaptionId.value = null }
     val selectedCaption get() = selectedCaptionId.value?.let { id -> captions.items.value.firstOrNull { it.id == id } }
     fun setCaptionValue(t: String) { selectedCaptionId.value?.let { captions.updateText(it, t) } }
     fun openCaptionInput() { captionInputOpen.value = true }
