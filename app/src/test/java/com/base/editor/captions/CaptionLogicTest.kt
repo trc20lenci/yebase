@@ -62,8 +62,12 @@ class CaptionLogicTest {
     }
 
     @Test fun presetsAreTikTokStyle() {
-        assertEquals(listOf("yellow", "green", "karaoke", "contrast"), CaptionPresets.all.map { it.id })
-        assertTrue(CaptionPresets.all.all { it.uppercase && it.strokeEm >= 0.09f && it.activeScale == 1.15f })
+        // первые четыре — исходные TikTok-стили; дальше идут новые, у всех уникальные id и имена
+        assertEquals(listOf("yellow", "green", "karaoke", "contrast"), CaptionPresets.all.take(4).map { it.id })
+        assertTrue(CaptionPresets.all.take(4).all { it.uppercase && it.strokeEm >= 0.09f && it.activeScale == 1.15f })
+        assertTrue(CaptionPresets.all.size >= 20)
+        assertEquals(CaptionPresets.all.size, CaptionPresets.all.map { it.id }.toSet().size)
+        assertEquals(CaptionPresets.all.size, CaptionPresets.all.map { it.name }.toSet().size)
         assertEquals(0xFFFFE600.toInt(), CaptionPresets.byId("yellow")!!.activeColor)
         assertEquals(0xFF00FF66.toInt(), CaptionPresets.byId("green")!!.activeColor)
     }
