@@ -39,6 +39,9 @@ class AutoCaptionGenerator(
 ) {
     fun isModelReady(lang: SpeechLanguage) = models.isReady(lang)
 
+    /** Тихая фоновая загрузка модели (без прогресса в интерфейсе). */
+    suspend fun prefetch(lang: SpeechLanguage) { if (!models.isReady(lang)) models.ensure(lang) { } }
+
     suspend fun generate(
         timeline: TimelineState,
         lang: SpeechLanguage,

@@ -293,7 +293,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                     val playhead by vm.playheadMs.collectAsStateWithLifecycle()
                     CaptionPanel(
                         items = captionItems, style = captionStyle, generation = captionGen, playheadMs = playhead, editingId = editingCaption,
-                        modelReady = vm.captions::isModelReady, onGenerate = vm::generateCaptions, onCancel = vm.captions::cancelGeneration, onDismissError = vm.captions::dismissError,
+                        onPrefetch = vm::prefetchCaptionModel, onGenerate = vm::generateCaptions, onCancel = vm.captions::cancelGeneration, onDismissError = vm.captions::dismissError,
                         onOpenItem = vm::openCaptionItem, onCloseEdit = { vm.editingCaptionId.value = null },
                         onUpdateText = vm.captions::updateText, onUpdateTiming = vm.captions::updateTiming, onDelete = vm.captions::delete,
                         onAdd = vm::addCaptionHere, onClearAll = vm.captions::clearAll,
@@ -399,6 +399,7 @@ private fun PreviewStage(
     val scrubOn by vm.scrubOverlayOn.collectAsStateWithLifecycle()
     val scrubFrame by vm.scrubFrame.collectAsStateWithLifecycle()
     val bgSel by vm.canvasBg.collectAsStateWithLifecycle()
+    val cover by vm.overlayCover.collectAsStateWithLifecycle()
     val pipOn by vm.pipetteOn.collectAsStateWithLifecycle()
     val pipPos by vm.pipettePos.collectAsStateWithLifecycle()
     val pending = abs(aspectApplied - aspectNow) > 0.002f
@@ -406,7 +407,6 @@ private fun PreviewStage(
     Box(modifier.fillMaxWidth().background(Color.Black).clipToBounds(), contentAlignment = Alignment.Center) {
         // рамка выбранного формата: всё, что выходит за её границы, аппаратно отсекается
         Box(Modifier.aspectRatio(aspectNow.coerceIn(0.2f, 5f)).clipToBounds()) {
-            val surfaceTick by vm.controller.surfaceReset.collectAsStateWithLifecycle()
             AndroidView(
                 factory = { c ->
                     // CompositionPlayer умеет выводить только в SurfaceView (TextureView он не поддерживает и падает)
@@ -415,23 +415,21 @@ private fun PreviewStage(
                         resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                         setShutterBackgroundColor(android.graphics.Color.BLACK)
                         player = vm.controller.player
-                        tag = surfaceTick
                     }
                 },
                 update = {
                     it.resizeMode = if (pending) AspectRatioFrameLayout.RESIZE_MODE_ZOOM else AspectRatioFrameLayout.RESIZE_MODE_FIT
-                    if (it.tag != surfaceTick) { it.player = null; it.player = vm.controller.player; it.tag = surfaceTick }   // сброс залипшей поверхности
                 },
                 modifier = Modifier.fillMaxSize(),
             )
             // кадр под курсором напрямую из файла, пока плеер на паузе догоняет позицию при перемотке
             val sf = scrubFrame
-            if (scrubOn && sf != null) Box(Modifier.fillMaxSize().background(bgSel.argb?.let { Color(it) } ?: Color(0xFF16181D))) {
-                if (bgSel == com.base.editor.core.CanvasBg.BLUR) {
+            if (scrubOn && (sf != null || cover)) Box(Modifier.fillMaxSize().background(bgSel.argb?.let { Color(it) } ?: Color(0xFF16181D))) {
+                if (sf != null && bgSel == com.base.editor.core.CanvasBg.BLUR) {
                     // подложка «размытое видео»: тот же кадр на весь холст, сильно размытый (на Android 12+)
                     Image(sf.image, null, contentScale = androidx.compose.ui.layout.ContentScale.Crop, modifier = Modifier.fillMaxSize().blur(28.dp))
                 }
-                Image(
+                if (sf != null) Image(
                     sf.image, null, contentScale = androidx.compose.ui.layout.ContentScale.Fit,
                     modifier = Modifier.fillMaxSize().graphicsLayer {
                         // во время жеста — текущее положение пальцев (SurfaceView не умеет масштаб/поворот, а картинка Compose — умеет)

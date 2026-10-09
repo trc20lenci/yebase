@@ -9,6 +9,10 @@ import android.util.Log
 import com.base.editor.core.Clip
 import com.base.editor.core.MediaType
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import java.util.concurrent.atomic.AtomicInteger
 import org.tensorflow.lite.DataType
 import org.tensorflow.lite.Interpreter
 import kotlinx.coroutines.ensureActive
@@ -38,65 +42,84 @@ class BgRemover(private val context: Context, private val store: MaskStore = Mas
         val spanMs = clip.srcSpanMs
         if (spanMs > MAX_SPAN_MS) throw Failure("Для удаления фона клип должен быть не длиннее ${MAX_SPAN_MS / 1000} с")
         val modelFile = ensureModel()
-        val interpreter = Interpreter(directBuffer(modelFile), Interpreter.Options().setNumThreads(4))
-        val retriever = if (clip.type == MediaType.VIDEO) MediaMetadataRetriever().also { it.setDataSource(context, Uri.parse(clip.uri)) } else null
+        val count = if (clip.type == MediaType.IMAGE) 1 else ceil(spanMs * FPS / 1000.0).toInt() + 1
+        val frames = arrayOfNulls<ByteArray>(count)
+        val done = AtomicInteger(0)
+        // кадры считаются параллельно (по одному модельному интерпретатору и декодеру на поток): главное время уходит на декодирование видео
+        val workers = (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 4)
+        var dims = IntArray(2)
+        coroutineScope {
+            (0 until workers).map { w ->
+                async(Dispatchers.Default) {
+                    val interpreter = Interpreter(directBuffer(modelFile), Interpreter.Options().setNumThreads(2))
+                    val retriever = if (clip.type == MediaType.VIDEO) MediaMetadataRetriever().also { it.setDataSource(context, Uri.parse(clip.uri)) } else null
+                    try {
+                        // форма входа/выхода читается из самой модели: [1, H, W, 3] → [1, H, W, C]
+                        val inShape = interpreter.getInputTensor(0).shape()
+                        val outShape = interpreter.getOutputTensor(0).shape()
+                        val inH = inShape[1]; val inW = inShape[2]
+                        val outH = outShape[1]; val outW = outShape[2]; val outC = if (outShape.size > 3) outShape[3] else 1
+                        if (w == 0) dims = intArrayOf(outW, outH)
+                        val floatInput = interpreter.getInputTensor(0).dataType() == DataType.FLOAT32
+                        val input = ByteBuffer.allocateDirect(inW * inH * 3 * (if (floatInput) 4 else 1)).order(ByteOrder.nativeOrder())
+                        val output = ByteBuffer.allocateDirect(outW * outH * outC * 4).order(ByteOrder.nativeOrder())
+                        val pixels = IntArray(inW * inH)
+                        var i = w
+                        while (i < count) {
+                            ensureActive()
+                            val srcMs = clip.srcInMs + (i * 1000L / FPS)
+                            val bmp = frame(clip, retriever, srcMs) ?: throw Failure("Не удалось прочитать кадр")
+                            val scaled = if (bmp.width == inW && bmp.height == inH) bmp else Bitmap.createScaledBitmap(bmp, inW, inH, false)
+                            scaled.getPixels(pixels, 0, inW, 0, 0, inW, inH)
+                            input.rewind()
+                            for (px in pixels) {
+                                val r = (px shr 16) and 0xFF; val g = (px shr 8) and 0xFF; val b = px and 0xFF
+                                if (floatInput) { input.putFloat(r / 255f); input.putFloat(g / 255f); input.putFloat(b / 255f) }
+                                else { input.put(r.toByte()); input.put(g.toByte()); input.put(b.toByte()) }
+                            }
+                            input.rewind(); output.rewind()
+                            interpreter.run(input, output)
+                            output.rewind()
+                            val fb = output.asFloatBuffer()
+                            val bytes = ByteArray(outW * outH)
+                            var mn = Float.MAX_VALUE; var mx = -Float.MAX_VALUE
+                            for (k in 0 until outW * outH * outC) { val v = fb.get(k); if (v < mn) mn = v; if (v > mx) mx = v }
+                            val logits = mn < -0.01f || mx > 1.01f
+                            for (k in bytes.indices) {
+                                val v = if (outC == 1) fb.get(k) else {
+                                    val bgV = fb.get(k * outC); val fgV = fb.get(k * outC + 1)       // канал 1 — «человек»
+                                    if (logits) 1f / (1f + kotlin.math.exp(bgV - fgV)) else fgV
+                                }
+                                val p = if (outC == 1 && logits) 1f / (1f + kotlin.math.exp(-v)) else v
+                                bytes[k] = (p.coerceIn(0f, 1f) * 255f).toInt().toByte()
+                            }
+                            frames[i] = bytes
+                            onProgress(done.incrementAndGet().toFloat() / count)
+                            i += workers
+                        }
+                    } finally { runCatching { retriever?.release() }; runCatching { interpreter.close() } }
+                }
+            }.awaitAll()
+        }
+        val (outW, outH) = dims[0] to dims[1]
+        val first = frames[0] ?: throw Failure("Модель не вернула маску")
+        // модель могла вернуть «фон» вместо «человека»: по краям кадра значения выше, чем в центре
+        val invert = borderMean(first, outW, outH) > centerMean(first, outW, outH) + 20
         val part = File(store.file(clip.uri).path + ".part").apply { delete() }
         try {
-            // форма входа/выхода читается из самой модели: [1, H, W, 3] → [1, H, W, C]
-            val inShape = interpreter.getInputTensor(0).shape()
-            val outShape = interpreter.getOutputTensor(0).shape()
-            val inH = inShape[1]; val inW = inShape[2]
-            val outH = outShape[1]; val outW = outShape[2]; val outC = if (outShape.size > 3) outShape[3] else 1
-            val floatInput = interpreter.getInputTensor(0).dataType() == DataType.FLOAT32
-            val input = ByteBuffer.allocateDirect(inW * inH * 3 * (if (floatInput) 4 else 1)).order(ByteOrder.nativeOrder())
-            val output = ByteBuffer.allocateDirect(outW * outH * outC * 4).order(ByteOrder.nativeOrder())
-            val pixels = IntArray(inW * inH)
-            val count = if (clip.type == MediaType.IMAGE) 1 else ceil(spanMs * FPS / 1000.0).toInt() + 1
-            var invert: Boolean? = null
             RandomAccessFile(part, "rw").use { out ->
-                out.write(ByteArray(MaskStore.HEADER.toInt()))                           // заголовок допишем в конце
-                for (i in 0 until count) {
-                    coroutineContext.ensureActive()
-                    val srcMs = clip.srcInMs + (i * 1000L / FPS)
-                    val bmp = frame(clip, retriever, srcMs) ?: throw Failure("Не удалось прочитать кадр")
-                    val scaled = Bitmap.createScaledBitmap(bmp, inW, inH, true)
-                    scaled.getPixels(pixels, 0, inW, 0, 0, inW, inH)
-                    input.rewind()
-                    for (px in pixels) {
-                        val r = (px shr 16) and 0xFF; val g = (px shr 8) and 0xFF; val b = px and 0xFF
-                        if (floatInput) { input.putFloat(r / 255f); input.putFloat(g / 255f); input.putFloat(b / 255f) }
-                        else { input.put(r.toByte()); input.put(g.toByte()); input.put(b.toByte()) }
-                    }
-                    input.rewind(); output.rewind()
-                    interpreter.run(input, output)
-                    output.rewind()
-                    val fb = output.asFloatBuffer()
-                    val bytes = ByteArray(outW * outH)
-                    var mn = Float.MAX_VALUE; var mx = -Float.MAX_VALUE
-                    for (k in 0 until outW * outH * outC) { val v = fb.get(k); if (v < mn) mn = v; if (v > mx) mx = v }
-                    val logits = mn < -0.01f || mx > 1.01f
-                    for (k in bytes.indices) {
-                        val v = if (outC == 1) fb.get(k) else {
-                            val bgV = fb.get(k * outC); val fgV = fb.get(k * outC + 1)       // канал 1 — «человек»
-                            if (logits) 1f / (1f + kotlin.math.exp(bgV - fgV)) else fgV
-                        }
-                        val p = if (outC == 1 && logits) 1f / (1f + kotlin.math.exp(-v)) else v
-                        bytes[k] = (p.coerceIn(0f, 1f) * 255f).toInt().toByte()
-                    }
-                    if (invert == null) invert = borderMean(bytes, outW, outH) > centerMean(bytes, outW, outH) + 20     // модель вернула «фон»
-                    if (invert == true) for (k in bytes.indices) bytes[k] = (255 - (bytes[k].toInt() and 0xFF)).toByte()
-                    out.write(bytes)
-                    onProgress((i + 1f) / count)
-                }
                 val header = ByteBuffer.allocate(MaskStore.HEADER.toInt()).order(ByteOrder.BIG_ENDIAN)
                 header.putInt(MaskStore.MAGIC).putInt(outW).putInt(outH).putInt(FPS).putLong(clip.srcInMs).putInt(count)
-                out.seek(0); out.write(header.array())
+                out.write(header.array())
+                for (f in frames) {
+                    val bytes = f ?: ByteArray(outW * outH) { 255.toByte() }
+                    if (invert) for (k in bytes.indices) bytes[k] = (255 - (bytes[k].toInt() and 0xFF)).toByte()
+                    out.write(bytes)
+                }
             }
             val target = store.file(clip.uri); target.delete()
             if (!part.renameTo(target)) throw Failure("Не удалось сохранить маски")
-        } finally {
-            part.delete(); runCatching { retriever?.release() }; runCatching { interpreter.close() }
-        }
+        } finally { part.delete() }
     }
 
     private fun frame(clip: Clip, r: MediaMetadataRetriever?, srcMs: Long): Bitmap? =
@@ -153,8 +176,8 @@ class BgRemover(private val context: Context, private val store: MaskStore = Mas
 
     private companion object {
         const val TAG = "BaseBg"
-        const val FPS = 12
-        const val MAX_SIDE = 320
+        const val FPS = 6
+        const val MAX_SIDE = 256
         const val MAX_SPAN_MS = 120_000L
         const val MODEL_NAME = "selfie_segmenter.tflite"
         const val MODEL_URL = "https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_segmenter/float16/latest/selfie_segmenter.tflite"

@@ -166,14 +166,14 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         val t = playheadMs.value
         val clip = clips.value.firstOrNull { it.row == 0 && it.type != com.base.editor.core.MediaType.AUDIO && t >= it.startMs && t < it.endMs } ?: return
         val local = t - clip.startMs
-        scrubHideJob?.cancel(); scrubOverlayOn.value = true
+        scrubHideJob?.cancel(); scrubOverlayOn.value = true; overlayCover.value = true
         scrubFrames.request(clip, local, true, controller.state.value.transformAt(clip.id, local), controller.cropOf(clip.id))
         val v0 = controller.appliedVersion.value
         snapshotJob?.cancel()
         snapshotJob = viewModelScope.launch {
             kotlinx.coroutines.withTimeoutOrNull(9000) { controller.appliedVersion.first { it > v0 } }
             controller.awaitSeekSettled(2500)
-            scrubOverlayOn.value = false; scrubFrames.clear()
+            hideOverlay()
         }
     }
 
@@ -181,6 +181,9 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     private val scrubFrames = com.base.editor.media.ScrubFrames(app, viewModelScope)
     val scrubFrame = scrubFrames.frame
     val scrubOverlayOn = MutableStateFlow(false)
+    /** true — подмена закрывает плеер сразу (смена формата/фона), не дожидаясь кадра: иначе видно, как картинка «сплющивается». */
+    val overlayCover = MutableStateFlow(false)
+    private fun hideOverlay() { scrubHideJob?.cancel(); snapshotJob?.cancel(); scrubOverlayOn.value = false; overlayCover.value = false; scrubFrames.clear() }
     private var scrubHideJob: kotlinx.coroutines.Job? = null
 
     var onRequestAddMedia: (() -> Unit)? = null
@@ -271,7 +274,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
             val deadline = System.currentTimeMillis() + 3000
             while (controller.isBuffering.value && System.currentTimeMillis() < deadline) delay(50)
             delay(150)
-            scrubOverlayOn.value = false; scrubFrames.clear()
+            hideOverlay()
         }
     }
 
@@ -372,6 +375,8 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     fun closeCaptions() { captionPanelOpen.value = false; editingCaptionId.value = null }
     fun openCaptionItem(c: CaptionItem) { controller.pause(); controller.seekTo(c.startMs); editingCaptionId.value = c.id }
     fun addCaptionHere() { editingCaptionId.value = captions.addAt(playheadMs.value) }
+    fun prefetchCaptionModel(lang: com.base.editor.captions.asr.SpeechLanguage) = captions.prefetch(lang)
+
     fun generateCaptions(lang: com.base.editor.captions.asr.SpeechLanguage) {
         if (controller.state.value.clips.none { it.type == com.base.editor.core.MediaType.VIDEO }) { events.value = "Нужен хотя бы один видеоклип со звуком"; return }
         controller.pause(); captions.generate(controller.state.value, lang)
@@ -443,6 +448,8 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     }
     init {
         runPendingTool()
+        viewModelScope.launch { controller.isPlaying.collect { if (it) hideOverlay() } }
+        captions.prefetch(com.base.editor.captions.asr.SpeechLanguage.RU)
         com.base.editor.media.gl.FxDiagnostics.listener = { msg -> events.value = msg }
     }
 
@@ -615,7 +622,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
                 val deadline = System.currentTimeMillis() + 5000
                 while (controller.appliedVersion.value == applied && System.currentTimeMillis() < deadline) delay(40)
                 liveClipTransform.value = null
-                scrubOverlayOn.value = false; scrubFrames.clear()
+                hideOverlay()
             }
         } else controller.pause()
     }

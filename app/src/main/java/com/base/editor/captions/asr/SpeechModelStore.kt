@@ -5,6 +5,8 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.net.HttpURLConnection
@@ -16,10 +18,13 @@ import kotlin.coroutines.coroutineContext
 class SpeechModelStore(context: Context, private val io: CoroutineDispatcher = Dispatchers.IO) {
     private val root = File(context.applicationContext.filesDir, "speech-models").apply { mkdirs() }
 
+    /** Фоновая предзагрузка и запрос из генерации не должны качать одну модель дважды. */
+    private val lock = Mutex()
+
     fun isReady(lang: SpeechLanguage) = File(File(root, lang.modelName), READY).exists()
 
     /** Возвращает папку модели, при необходимости скачав её. [onProgress] — 0f..1f. */
-    suspend fun ensure(lang: SpeechLanguage, onProgress: (Float) -> Unit): File = withContext(io) {
+    suspend fun ensure(lang: SpeechLanguage, onProgress: (Float) -> Unit): File = withContext(io) { lock.withLock {
         val dir = File(root, lang.modelName)
         if (File(dir, READY).exists()) return@withContext modelRoot(dir)
 
@@ -59,7 +64,7 @@ class SpeechModelStore(context: Context, private val io: CoroutineDispatcher = D
         } finally {
             conn.disconnect()
         }
-    }
+    } }
 
     /** Внутри архива модель обычно лежит в единственной подпапке. */
     private fun modelRoot(dir: File): File {

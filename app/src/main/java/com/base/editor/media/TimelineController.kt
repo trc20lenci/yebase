@@ -216,6 +216,17 @@ class TimelineController(
         if (rebuild) { model.discardCheckpointIfNoop(); afterStructuralEdit() } else refreshFrameLive()
     }
 
+    private var rerenderSign = 1
+    /**
+     * Перерисовать текущий кадр с новыми параметрами эффектов. Seek в ТУ ЖЕ позицию плеер игнорирует (кадр остаётся
+     * прежним, новое положение видно только после следующей перемотки) — поэтому смещаемся на 1 мс, чередуя стороны.
+     */
+    private fun rerenderCurrentFrame() {
+        val pos = player.currentPosition
+        rerenderSign = -rerenderSign
+        seekPlayerSafely(if (pos < 2) pos + 1 else pos + rerenderSign)
+    }
+
     private var lastLiveRefresh = 0L
     /** Перерисовка текущего кадра при движении слайдера: публикуем состояние и просим плеер обновить кадр (не чаще ~30 раз/с). */
     private fun refreshFrameLive() {
@@ -223,11 +234,11 @@ class TimelineController(
         val now = SystemClock.uptimeMillis()
         if (now - lastLiveRefresh < 33 || !playerReady) return
         lastLiveRefresh = now
-        seekPlayerSafely(player.currentPosition)
+        rerenderCurrentFrame()
     }
 
     /** Слайдер отпущен: сохранить и перерисовать кадр точно. */
-    fun commitFxEdit() { model.discardCheckpointIfNoop(); publish(); _committed.tryEmit(Unit); if (playerReady) seekPlayerSafely(player.currentPosition) }
+    fun commitFxEdit() { model.discardCheckpointIfNoop(); publish(); _committed.tryEmit(Unit); if (playerReady) rerenderCurrentFrame() }
 
     // ───────── ключевые кадры ─────────
     /** Ключ под курсором (в локальном времени клипа) или null. */
@@ -250,7 +261,7 @@ class TimelineController(
     fun commitTransformEdit() {
         model.discardCheckpointIfNoop()
         publish(); _committed.tryEmit(Unit)
-        if (playerReady) seekPlayerSafely(player.currentPosition)
+        if (playerReady) rerenderCurrentFrame()
         scope.launch { awaitSeekSettled(); _applied.value++ }
     }
 
@@ -328,22 +339,14 @@ class TimelineController(
         scrubEnd()                                                // доставить последнюю позицию перемотки
         if (_playhead.value >= _state.value.totalMs - 50) seekTo(0)
         if (!playerReady) { playWhenReady = true; return }        // композиция ещё готовится: стартуем, как только будет READY
-        if (scrubbedSincePlay) {
-            // после частой перемотки декодер/поверхность могут залипнуть (звук идёт, кадр стоит): переподключаем
-            // поверхность и перемещаем плеер в ту же позицию (flush декодера), и только потом запускаем воспроизведение
-            scrubbedSincePlay = false
-            refreshVideoSurface()
-            scope.launch {
-                delay(SURFACE_REBIND_MS)
-                if (playerReady) { seekPlayerSafely(player.currentPosition); resumePlayer() } else playWhenReady = true
-            }
+        if (seekInFlight) {
+            // после перемотки пальцем даём плееру закончить seek и показать кадр — только потом стартуем (иначе звук идёт, а кадр стоит)
+            scope.launch { awaitSeekSettled(2500); if (playerReady) resumePlayer() else playWhenReady = true }
             return
         }
         resumePlayer()
     }
 
-    /** Просит интерфейс заново привязать поверхность видео к плееру. */
-    fun refreshVideoSurface() { _surfaceReset.value++ }
 
     /** Play в любом состоянии: из IDLE — prepare, из ENDED — с начала, из BUFFERING — стартует сам по готовности. */
     private fun resumePlayer() {
@@ -380,9 +383,6 @@ class TimelineController(
     private var lastSeekAt = 0L
     private var scrubbedSincePlay = false
     private var bufferingJob: Job? = null
-    private val _surfaceReset = MutableStateFlow(0)
-    /** Счётчик «переподключить поверхность видео»: интерфейс пересоздаёт привязку PlayerView к плееру. */
-    val surfaceReset: StateFlow<Int> = _surfaceReset.asStateFlow()
     private var scrubJob: Job? = null
 
     /**
@@ -487,7 +487,7 @@ class TimelineController(
             delay(BUFFERING_WATCHDOG_MS)
             if (player.playbackState == Player.STATE_BUFFERING) {
                 Log.w(TAG, "буферизация затянулась — сброс декодера")
-                refreshVideoSurface(); delay(SURFACE_REBIND_MS); seekPlayerSafely(player.currentPosition)
+                delay(SURFACE_REBIND_MS); seekPlayerSafely(player.currentPosition)
             }
         }
         when (playbackState) {

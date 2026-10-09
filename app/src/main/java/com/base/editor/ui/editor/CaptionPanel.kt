@@ -76,7 +76,7 @@ fun CaptionPanel(
     generation: GenerationState,
     playheadMs: Long,
     editingId: String?,
-    modelReady: (SpeechLanguage) -> Boolean,
+    onPrefetch: (SpeechLanguage) -> Unit,
     onGenerate: (SpeechLanguage) -> Unit,
     onCancel: () -> Unit,
     onDismissError: () -> Unit,
@@ -93,6 +93,7 @@ fun CaptionPanel(
 ) {
     var tab by rememberSaveable { mutableStateOf(0) }
     var lang by rememberSaveable { mutableStateOf(SpeechLanguage.RU) }
+    androidx.compose.runtime.LaunchedEffect(lang) { onPrefetch(lang) }        // модель выбранного языка тихо качается в фоне
 
     Column(Modifier.fillMaxWidth().background(BaseColors.DarkPanel).padding(top = 6.dp, bottom = 8.dp)) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -104,7 +105,7 @@ fun CaptionPanel(
             Box(Modifier.pressable(onClick = onClose).size(40.dp).clip(CircleShape), contentAlignment = Alignment.Center) { Icon(Lucide.Check, "Готово", tint = Color.White) }
         }
         Box(Modifier.heightIn(max = 250.dp).fillMaxWidth()) {
-            if (tab == 0) TextTab(items, generation, playheadMs, lang, { lang = it }, modelReady, onGenerate, onCancel, onDismissError, onOpenItem, onAdd, onClearAll)
+            if (tab == 0) TextTab(items, generation, playheadMs, lang, { lang = it }, onGenerate, onCancel, onDismissError, onOpenItem, onAdd, onClearAll)
             else StyleTab(style, onPreset, onStyle)
         }
     }
@@ -115,13 +116,13 @@ fun CaptionPanel(
 @Composable
 private fun TextTab(
     items: List<CaptionItem>, generation: GenerationState, playheadMs: Long, lang: SpeechLanguage, onLang: (SpeechLanguage) -> Unit,
-    modelReady: (SpeechLanguage) -> Boolean, onGenerate: (SpeechLanguage) -> Unit, onCancel: () -> Unit, onDismissError: () -> Unit,
+    onGenerate: (SpeechLanguage) -> Unit, onCancel: () -> Unit, onDismissError: () -> Unit,
     onOpen: (CaptionItem) -> Unit, onAdd: () -> Unit, onClearAll: () -> Unit,
 ) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp)) {
         when (generation) {
-            is GenerationState.Downloading -> Progress("Загрузка модели распознавания… ${(generation.fraction * 100).toInt()}%", generation.fraction, onCancel)
-            is GenerationState.Recognizing -> Progress("Распознаём речь… ${(generation.fraction * 100).toInt()}%", generation.fraction, onCancel)
+            // загрузка модели идёт в фоне и в интерфейсе не показывается: для пользователя это одно «Создание субтитров…»
+            is GenerationState.Downloading, is GenerationState.Recognizing -> Progress("Создание субтитров…", onCancel)
             else -> {
                 if (generation is GenerationState.Failed) {
                     Text(generation.message, color = Color(0xFFFF8A80), fontSize = 13.sp, modifier = Modifier.pressable(onClick = onDismissError).padding(vertical = 4.dp))
@@ -133,7 +134,6 @@ private fun TextTab(
                     Text(if (items.isEmpty()) "Создать субтитры" else "Создать заново", Modifier.pressable { onGenerate(lang) }.clip(RoundedCornerShape(10.dp)).background(BaseColors.Primary)
                         .padding(horizontal = 16.dp, vertical = 9.dp), color = Color.Black, fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 }
-                if (!modelReady(lang)) Text("Первый раз потребуется скачать модель (~${lang.approxMb} МБ), дальше всё работает офлайн.", color = Color.White.copy(alpha = .55f), fontSize = 12.sp, modifier = Modifier.padding(top = 6.dp))
             }
         }
         Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -173,9 +173,6 @@ private fun StyleTab(style: CaptionStyle, onPreset: (String) -> Unit, onStyle: (
         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             items(CaptionFont.entries.toList()) { f -> Chip(f.label, style.font == f) { onStyle { it.copy(font = f, fontWeight = if (CaptionFonts.weightRange(f) == null) 400 else it.fontWeight.coerceIn(CaptionFonts.weightRange(f)!!)) } } }
         }
-        CaptionFonts.weightRange(style.font)?.let { r ->
-            SliderRow("Насыщенность", style.fontWeight.toFloat(), r.first.toFloat()..r.last.toFloat(), "${style.fontWeight}") { v -> onStyle { it.copy(fontWeight = (v / 100).toInt() * 100) } }
-        }
         SliderRow("Размер", style.sizeFrac, 0.03f..0.09f, "${(style.sizeFrac * 1000).toInt()}") { v -> onStyle { it.copy(sizeFrac = v) } }
         SliderRow("Положение", style.positionY, 0.1f..0.9f, "${(style.positionY * 100).toInt()}%") { v -> onStyle { it.copy(positionY = v) } }
         ToggleRow("Все заглавные", style.uppercase) { v -> onStyle { it.copy(uppercase = v) } }
@@ -204,11 +201,11 @@ private fun StyleTab(style: CaptionStyle, onPreset: (String) -> Unit, onStyle: (
 @Composable private fun Label(t: String) = Text(t, color = Color.White.copy(alpha = .6f), fontSize = 12.sp, modifier = Modifier.padding(top = 10.dp, bottom = 6.dp))
 
 @Composable
-private fun Progress(label: String, fraction: Float, onCancel: () -> Unit) {
-    Column(Modifier.padding(vertical = 6.dp)) {
-        Text(label, color = Color.White.copy(alpha = .85f), fontSize = 14.sp)
-        androidx.compose.material3.LinearProgressIndicator(progress = { fraction.coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp), color = BaseColors.Primary)
-        Text("Отмена", color = Color.White.copy(alpha = .7f), fontSize = 13.sp, modifier = Modifier.pressable(onClick = onCancel).padding(vertical = 4.dp))
+private fun Progress(label: String, onCancel: () -> Unit) {
+    Row(Modifier.fillMaxWidth().padding(vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        CircularProgressIndicator(Modifier.size(22.dp), color = BaseColors.Primary, strokeWidth = 2.5.dp)
+        Text(label, color = Color.White.copy(alpha = .9f), fontSize = 15.sp, modifier = Modifier.padding(start = 12.dp).weight(1f))
+        Text("Отмена", color = Color.White.copy(alpha = .7f), fontSize = 13.sp, modifier = Modifier.pressable(onClick = onCancel).padding(8.dp))
     }
 }
 

@@ -61,6 +61,16 @@ class CaptionManager(
     // ───────── генерация ─────────
     fun isModelReady(lang: SpeechLanguage) = generator.isModelReady(lang)
 
+    private val prefetching = mutableSetOf<SpeechLanguage>()
+    /** Модель выбранного языка качается в фоне заранее, пользователь этого не видит; сбой — тихо, повторим при следующем выборе. */
+    fun prefetch(lang: SpeechLanguage) {
+        if (generator.isModelReady(lang) || !prefetching.add(lang)) return
+        scope.launch(dispatchers.default) {
+            runCatching { generator.prefetch(lang) }.onFailure { Log.w(TAG, "фоновая загрузка модели $lang", it) }
+            prefetching.remove(lang)
+        }
+    }
+
     fun generate(timeline: TimelineState, lang: SpeechLanguage) {
         job?.cancel()
         job = scope.launch(dispatchers.default) {
