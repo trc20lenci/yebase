@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.ui.Alignment
 import com.base.editor.ui.theme.haptic
 import com.base.editor.ui.theme.Haptic
