@@ -350,7 +350,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     private fun selectedClipAtPlayhead(): Clip? {
         val id = selectedId.value ?: return null
         val t = playheadMs.value
-        return clips.value.firstOrNull { it.id == id && (it.row == 0 || it.row == TimelineController.OVERLAY_ROW) && it.type != com.base.editor.core.MediaType.AUDIO && t >= it.startMs && t < it.endMs }
+        return clips.value.firstOrNull { it.id == id && (it.row == 0 || it.row == com.base.editor.media.CompositionFactory.OVERLAY_ROW) && it.type != com.base.editor.core.MediaType.AUDIO && t >= it.startMs && t < it.endMs }
     }
 
     /** Есть ли ключ ровно под курсором плеера (для иконки «ромбик с минусом»). */
