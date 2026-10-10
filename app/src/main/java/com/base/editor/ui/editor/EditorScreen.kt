@@ -158,6 +158,8 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
     val mediaTool by vm.mediaTool.collectAsStateWithLifecycle()
     val bgJob by vm.bgJob.collectAsStateWithLifecycle()
     val bgBar by vm.bgBarOpen.collectAsStateWithLifecycle()
+    val ttsVoiceSel by vm.ttsVoice.collectAsStateWithLifecycle()
+    val ttsBusySel by vm.ttsBusy.collectAsStateWithLifecycle()
     val canvasBgSel by vm.canvasBg.collectAsStateWithLifecycle()
     val pagTemplates by vm.pagTemplates.collectAsStateWithLifecycle()
 
@@ -274,6 +276,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                                     onBack = { vm.select(null) }, onSub = vm::setTextSub, onEditText = vm::openTextInput,
                                     onSplit = vm::splitText, onDelete = vm::deleteText, onChange = vm::editText,
                                     onStyle = vm::applyTextStyle, onAnimation = vm::applyTextAnimation, onImportPag = vm::importPag,
+                                    voice = ttsVoiceSel, voiceBusy = ttsBusySel, onVoice = vm::setTtsVoice, onSpeak = vm::speakSelectedText,
                                 )
                             }
                             ToolMode.CAPTION -> ToolRow {

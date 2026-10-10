@@ -297,10 +297,10 @@ class TimelineController(
     }
 
     /** Музыка из файлов устройства: блок на аудиодорожке (row 1), старт — от курсора. */
-    fun addAudio(uri: String, srcDurMs: Long) {
+    fun addAudio(uri: String, srcDurMs: Long, startMs: Long? = null) {
         if (srcDurMs <= 0) { _events.tryEmit("Не удалось прочитать аудиофайл"); return }
         pause(); model.checkpoint()
-        val start = _playhead.value.coerceIn(0L, model.totalMs)
+        val start = (startMs ?: _playhead.value).coerceAtLeast(0L)
         val id = model.addClip(AUDIO_ROW, MediaType.AUDIO, uri, srcDurMs, srcDurMs)
         // блок ставится от курсора, а не в конец дорожки
         if (model.state().clips.firstOrNull { it.id == id }?.startMs != start) model.moveClip(id, start, 0, -1)

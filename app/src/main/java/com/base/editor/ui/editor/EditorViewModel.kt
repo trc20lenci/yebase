@@ -80,7 +80,7 @@ data class LiveClip(val id: Long, val baked: ClipTransform, val current: ClipTra
 enum class MediaTool { SPEED, VOLUME, CHROMA, BG }
 
 /** Раздел нижней панели текста. */
-enum class TextSub { FONTS, STYLES, ANIMATION, COLOR }
+enum class TextSub { FONTS, STYLES, ANIMATION, COLOR, VOICE }
 
 private const val SCRUB_OVERLAY_HOLD_MS = 350L
 
@@ -741,6 +741,38 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     fun setCaptionValue(t: String) { selectedCaptionId.value?.let { captions.updateText(it, t) } }
     fun openCaptionInput() { captionInputOpen.value = true }
     fun closeCaptionInput() { captionInputOpen.value = false }
+
+    // ───────── текст в речь (Piper) ─────────
+    val ttsVoice = MutableStateFlow(com.base.editor.tts.TtsVoice.RU_IRINA)
+    val ttsBusy = MutableStateFlow(false)
+    private val tts = com.base.editor.tts.PiperTts(app)
+    private var ttsJob: kotlinx.coroutines.Job? = null
+
+    fun setTtsVoice(v: com.base.editor.tts.TtsVoice) {
+        ttsVoice.value = v
+        viewModelScope.launch { runCatching { tts.prefetch(v) } }          // голос тихо скачивается заранее
+    }
+
+    /** «Озвучить»: текст выделенного слоя → голос Piper → звуковой блок на аудиодорожке, начиная с начала текстового слоя. */
+    fun speakSelectedText() {
+        val clip = selectedTextClip ?: return
+        if (clip.text.isBlank()) { events.value = "Сначала введите текст"; return }
+        if (ttsBusy.value) return
+        ttsBusy.value = true
+        ttsJob = viewModelScope.launch {
+            try {
+                val r = tts.synthesize(ttsVoice.value, clip.text)
+                controller.addAudio(android.net.Uri.fromFile(r.file).toString(), r.durationMs, startMs = clip.startMs)
+                HapticBus.emit(Haptic.SUCCESS)
+                events.value = "Озвучка добавлена на аудиодорожку"
+            } catch (e: kotlinx.coroutines.CancellationException) { throw e
+            } catch (e: Exception) {
+                android.util.Log.e("BaseTts", "озвучка", e)
+                HapticBus.emit(Haptic.ERROR)
+                events.value = "Не удалось озвучить: ${e.javaClass.simpleName}: ${e.message?.take(90)}"
+            } finally { ttsBusy.value = false }
+        }
+    }
 
     fun importPag(uri: android.net.Uri) {
         viewModelScope.launch {
