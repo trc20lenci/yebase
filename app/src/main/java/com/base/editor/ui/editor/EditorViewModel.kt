@@ -62,6 +62,7 @@ interface TimelineActions {
     fun editEnd()
     fun setZoom(pxPerSecDp: Float)
     fun addMedia()
+    fun addOverlay()
     fun addAudio()
     fun addText()
     fun openTransitions(leftId: Long)
@@ -215,7 +216,9 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         viewModelScope.launch { captions.committed.debounce(600).collect { persist() } }
         // файлы, выбранные в галерее по кнопке «+», приходят через почтовый ящик проекта
         viewModelScope.launch {
-            for (items in PickedMediaInbox.channel(projectId)) controller.addMedia(items)
+            for (items in PickedMediaInbox.channel(projectId)) {
+                if (overlayPick) { overlayPick = false; controller.addOverlay(items) } else controller.addMedia(items)
+            }
         }
         // выбранный клип / панель переходов не должны ссылаться на исчезнувшие клипы
         viewModelScope.launch {
@@ -326,7 +329,10 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     override fun trimEnd(id: Long, ms: Long) = controller.trimEnd(id, ms)
     override fun editEnd() = controller.commitEdit()
     override fun setZoom(pxPerSecDp: Float) { pxPerSec.value = pxPerSecDp.coerceIn(12f, 400f) }
-    override fun addMedia() { controller.pause(); onRequestAddMedia?.invoke() }
+    override fun addMedia() { overlayPick = false; controller.pause(); onRequestAddMedia?.invoke() }
+    /** «Наложение»: открывает галерею; выбранные фото/видео уйдут на дорожку наложений, а не в основную. */
+    override fun addOverlay() { overlayPick = true; controller.pause(); onRequestAddMedia?.invoke() }
+    private var overlayPick = false
     override fun addAudio() { onRequestAddAudio?.invoke() }
     override fun addText() { events.value = "Текстовые слои появятся на следующем этапе" }
 
@@ -344,7 +350,7 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
     private fun selectedClipAtPlayhead(): Clip? {
         val id = selectedId.value ?: return null
         val t = playheadMs.value
-        return clips.value.firstOrNull { it.id == id && it.row == 0 && t >= it.startMs && t < it.endMs }
+        return clips.value.firstOrNull { it.id == id && (it.row == 0 || it.row == TimelineController.OVERLAY_ROW) && it.type != com.base.editor.core.MediaType.AUDIO && t >= it.startMs && t < it.endMs }
     }
 
     /** Есть ли ключ ровно под курсором плеера (для иконки «ромбик с минусом»). */
@@ -612,13 +618,14 @@ class EditorViewModel(app: Application, private val handle: SavedStateHandle) : 
         val clip = clips.value.firstOrNull { it.id == clipId } ?: return
         val hasKeys = keyframes.value[clipId].orEmpty().isNotEmpty()
         val baked = liveClipTransform.value?.takeIf { it.id == clipId }?.baked ?: effectiveTransform(clip)
-        if (liveClipTransform.value == null) {
+        if (liveClipTransform.value == null && clip.row == 0) {
             // начало жеста: показываем кадр клипа картинкой поверх плеера — она следует за пальцами в реальном времени
             val local = (playheadMs.value - clip.startMs).coerceAtLeast(0L)
             scrubHideJob?.cancel(); scrubOverlayOn.value = true
             scrubFrames.request(clip, local, true, baked, controller.cropOf(clipId))
         }
         liveClipTransform.value = LiveClip(clipId, baked, transform)
+        if (clip.row != 0) controller.refreshLive()
         if (hasKeys) {
             // автоключ как в CapCut: любое движение кадра пальцем фиксирует ключ на текущей миллисекунде
             controller.setKeyframeTransform(clipId, playheadMs.value - clip.startMs, transform)

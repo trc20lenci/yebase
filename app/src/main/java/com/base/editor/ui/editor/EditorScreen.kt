@@ -224,7 +224,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
 
         AnimatedVisibility(!fullscreen, enter = barEnter, exit = barExit) {
           Column {
-            TransportRow(vm, hasMainSelected = clips.any { it.id == selected && it.row == 0 })
+            TransportRow(vm, hasMainSelected = clips.any { it.id == selected && (it.row == 0 || it.row == 2) && it.type != com.base.editor.core.MediaType.AUDIO })
 
             // Нижняя область ФИКСИРОВАННОЙ высоты: таймлайн + панель инструментов. Таймлайн живой в любом режиме
             // редактирования (клип, аудио, текст, субтитры): мотать проект и двигать курсор можно всегда.
@@ -248,7 +248,7 @@ fun EditorScreen(onClose: () -> Unit, onAddMedia: () -> Unit, vm: EditorViewMode
                                 ToolButton(Lucide.Type, "Текст", onClick = vm::openNewText)
                                 ToolButton(Lucide.Captions, "Субтитры", onClick = vm::openCaptions)
                                 ToolButton(Lucide.Ratio, "Формат", onClick = vm::openFormat)
-                                ToolButton(Lucide.Layers, "Наложение") { soon(ctx) }
+                                ToolButton(Lucide.Layers, "Наложение", onClick = vm::addOverlay)
                                 ToolButton(Lucide.Image, "Фон", onClick = vm::openBgBar)
                             }
                             ToolMode.MEDIA -> ScrollToolRow {

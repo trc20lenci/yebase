@@ -179,6 +179,9 @@ class TimelineController(
     /** Положение кадра клипа на холсте: между beginEdit() и commitEdit() — без пересборки плеера. */
     fun setClipTransform(id: Long, t: ClipTransform) { if (model.setTransform(id, t)) publish() }
 
+    /** Наложения кадр-подменой не показать (она закрыла бы основное видео): обновляем сам плеер (не чаще ~30 раз/с). */
+    fun refreshLive() { if (playerReady) { val now = SystemClock.uptimeMillis(); if (now - lastLiveRefresh >= 33) { lastLiveRefresh = now; rerenderCurrentFrame() } } }
+
     /** Кадрирование клипа (null — снять). Пересобирает композицию: Crop Effect идёт и в превью, и в экспорт. */
     fun setCrop(id: Long, r: com.base.editor.core.CropRect?) {
         pause(); model.checkpoint()
@@ -294,6 +297,26 @@ class TimelineController(
         }
         afterStructuralEdit()
         seekTo(firstStart)
+    }
+
+    /**
+     * Наложения: фото/видео поверх основного. Блок ложится на дорожку наложений (row 2) от курсора, по умолчанию
+     * уменьшен вдвое, чтобы было видно, что это наложение; положение меняется жестами на холсте.
+     */
+    fun addOverlay(items: List<PickedMedia>) {
+        if (items.isEmpty()) return
+        pause(); model.checkpoint()
+        val start = _playhead.value.coerceAtLeast(0L)
+        var cursor = start
+        items.forEach { m ->
+            val video = m.type == MediaType.VIDEO
+            val len = if (video) m.durationMs else IMAGE_DEFAULT_MS
+            val id = model.addClip(OVERLAY_ROW, m.type, m.uri, if (video) m.durationMs else 0, len)
+            model.moveClip(id, cursor, 0, -1)
+            model.setTransform(id, ClipTransform(scale = 0.5f))
+            cursor += len
+        }
+        afterStructuralEdit()
     }
 
     /** Музыка из файлов устройства: блок на аудиодорожке (row 1), старт — от курсора. */
@@ -534,6 +557,7 @@ class TimelineController(
         const val SURFACE_REBIND_MS = 70L
         const val BUFFERING_WATCHDOG_MS = 4000L
         const val AUDIO_ROW = 1
+        const val OVERLAY_ROW = 2
         val CODEC_ERRORS = setOf(
             PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
             PlaybackException.ERROR_CODE_DECODING_FAILED,

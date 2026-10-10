@@ -131,17 +131,51 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
             cursorMs = clip.endMs
         }
 
-        // музыка: параллельная последовательность только со звуком (видео у неё снято)
-        val music = req.state.clips.filter { it.row != 0 && it.type == MediaType.AUDIO }.sortedBy { it.startMs }
-        val builder = if (music.isEmpty()) Composition.Builder(seq.build()) else {
-            val audioSeq = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
+        // наложения (фото/видео поверх основного): отдельная видео-последовательность на всю длину проекта.
+        // Компоновщик Media3 рисует ПЕРВУЮ зарегистрированную последовательность поверх остальных, поэтому она идёт первой;
+        // «пустые» места заполняются прозрачной картинкой, чтобы основной поток не оставался без кадров.
+        val overlayClips = req.state.clips.filter { it.row == OVERLAY_ROW && it.type != MediaType.AUDIO }.sortedBy { it.startMs }
+        val fpsUsed = req.fps ?: FRAME_RATE
+        val overlaySeq = if (overlayClips.isEmpty()) null else {
+            val totalMs = maxOf(main.last().endMs, overlayClips.last().endMs)
+            val o = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO, C.TRACK_TYPE_VIDEO))
             var cur = 0L
-            for (c in music) {
-                if (c.startMs > cur) audioSeq.addGap((c.startMs - cur) * 1000)
-                audioSeq.addItem(editedItem(c, emptyList(), removeAudio = false, fps = req.fps ?: FRAME_RATE))
+            for (c in overlayClips) {
+                if (c.startMs > cur) o.addItem(transparentFiller(c.startMs - cur, fpsUsed))
+                val fx = mutableListOf<Effect>()
+                if (!req.safeMode && (req.state.chromas.containsKey(c.id) || req.state.bgs.containsKey(c.id))) {
+                    val id = c.id
+                    val maskReader = if (req.state.bgs.containsKey(id)) com.base.editor.media.MaskStore(context).reader(c.uri) else null
+                    val provider = req.liveFx ?: { _ -> com.base.editor.media.gl.FxParams(req.state.chromas[id], req.state.bgs[id]) }
+                    fx += com.base.editor.media.gl.ClipFxEffect({ provider(id) }, maskReader, c.startMs, c.srcInMs, c.speed, transparent = true)
+                }
+                req.state.crops[c.id]?.takeIf { !it.isFull }?.let { cr -> fx += Crop(-1f + 2f * cr.left, -1f + 2f * cr.right, 1f - 2f * cr.bottom, 1f - 2f * cr.top) }
+                fx += com.base.editor.media.gl.FitAlphaEffect(req.canvas.width, req.canvas.height)
+                o.addItem(editedItem(c, fx, req.removeAudio, fpsUsed))
                 cur = c.endMs
             }
-            Composition.Builder(seq.build(), audioSeq.build())
+            if (totalMs > cur) o.addItem(transparentFiller(totalMs - cur, fpsUsed))
+            o.build()
+        }
+
+        // музыка: параллельная последовательность только со звуком (видео у неё снято)
+        val music = req.state.clips.filter { it.row != 0 && it.type == MediaType.AUDIO }.sortedBy { it.startMs }
+        val audioSeq = if (music.isEmpty()) null else {
+            val a = EditedMediaItemSequence.Builder(setOf(C.TRACK_TYPE_AUDIO))
+            var cur = 0L
+            for (c in music) {
+                if (c.startMs > cur) a.addGap((c.startMs - cur) * 1000)
+                a.addItem(editedItem(c, emptyList(), removeAudio = false, fps = fpsUsed))
+                cur = c.endMs
+            }
+            a.build()
+        }
+        // порядок: наложения → основная → музыка (видео-входы нумеруются по порядку, наложения — «сверху»)
+        val builder = Composition.Builder(listOfNotNull(overlaySeq, seq.build(), audioSeq))
+        if (overlaySeq != null) {
+            val live = req.liveTransforms
+            val settings = OverlayCompositorSettings(req.canvas, overlayClips) { id, ms -> live?.invoke(id, ms) ?: req.state.transformAt(id, ms) }
+            builder.setVideoCompositorSettings(settings)
         }
         // эффект уровня композиции: время кадров — время всего проекта, слои совпадают с таймлайном
         val overlays = buildList<androidx.media3.effect.TextureOverlay> {
@@ -165,6 +199,17 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
      * Положение кадра на холсте. Поворот считается в «квадратных» единицах (поправка на пропорции кадра),
      * иначе картинка перекашивалась бы. Размер кадра не меняется: лишнее обрезается, пустое заливается чёрным.
      */
+    /** Прозрачная картинка на [durationMs]: заполняет «пустые» места последовательности наложений. */
+    private fun transparentFiller(durationMs: Long, fps: Int): EditedMediaItem {
+        val f = java.io.File(context.cacheDir, "transparent.png")
+        if (!f.exists() || f.length() == 0L) {
+            val bmp = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888)   // по умолчанию полностью прозрачный
+            f.outputStream().use { bmp.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, it) }
+        }
+        val item = MediaItem.Builder().setUri(android.net.Uri.fromFile(f)).setImageDurationMs(durationMs).build()
+        return EditedMediaItem.Builder(item).setDurationUs(durationMs * 1000).setFrameRate(fps).build()
+    }
+
     private fun clipTransformEffect(t: ClipTransform, canvas: Size): Effect =
         MatrixTransformation { transformMatrix(t, canvas) }
 
@@ -235,11 +280,38 @@ class CompositionFactory(private val context: Context, private val catalog: Tran
     companion object {
         private const val TAG = "BaseComposition"
         const val FRAME_RATE = 30
+        const val OVERLAY_ROW = 2
 
         /** Холст по пропорциям первого клипа; short — длина короткой стороны (480/720/1080). */
         fun canvasFor(aspect: Float, short: Int): Size {
             fun even(v: Int) = (v and 1.inv()).coerceAtLeast(2)
             return if (aspect >= 1f) Size(even((short * aspect).toInt()), even(short)) else Size(even(short), even((short / aspect).toInt()))
         }
+    }
+}
+
+/**
+ * Положение наложений в компоновщике Media3. Вход 0 — последовательность наложений (кадр уже размером с холст, поля
+ * прозрачные), вход 1 — основная дорожка (без смещений). Масштаб, поворот и сдвиг берутся из модели на каждом кадре —
+ * жест виден в превью без пересборки.
+ */
+@UnstableApi
+private class OverlayCompositorSettings(
+    private val canvas: Size, private val clips: List<Clip>, private val transformAt: (Long, Long) -> ClipTransform,
+) : androidx.media3.common.VideoCompositorSettings {
+    override fun getOutputSize(inputSizes: List<androidx.media3.common.util.Size>): androidx.media3.common.util.Size =
+        androidx.media3.common.util.Size(canvas.width, canvas.height)
+
+    override fun getOverlaySettings(inputId: Int, presentationTimeUs: Long): androidx.media3.common.OverlaySettings {
+        val plain = androidx.media3.effect.StaticOverlaySettings.Builder().build()
+        if (inputId != 0) return plain
+        val ms = presentationTimeUs / 1000
+        val c = clips.firstOrNull { ms >= it.startMs && ms < it.endMs } ?: return plain
+        val t = transformAt(c.id, (ms - c.startMs).coerceAtLeast(0L))
+        return androidx.media3.effect.StaticOverlaySettings.Builder()
+            .setScale(t.scale, t.scale)
+            .setRotationDegrees(-t.rotationDeg)                     // в Media3 поворот против часовой, у нас — по часовой на экране
+            .setBackgroundFrameAnchor(t.x * 2f, -t.y * 2f)          // доля холста → NDC (ось Y вверх)
+            .build()
     }
 }

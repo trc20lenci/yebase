@@ -34,15 +34,17 @@ class ClipFxEffect(
     private val clipStartMs: Long,
     private val srcInMs: Long,
     private val speed: Float,
+    /** Наложение поверх основного видео: убранное делается ПРОЗРАЧНЫМ (альфа), а не заливается цветом. */
+    private val transparent: Boolean = false,
 ) : GlEffect {
     override fun toGlShaderProgram(context: Context, useHdr: Boolean): GlShaderProgram =
-        try { FxProgram(params, mask, clipStartMs, srcInMs, speed, useHdr) } catch (e: GlUtil.GlException) { throw VideoFrameProcessingException(e) }
+        try { FxProgram(params, mask, clipStartMs, srcInMs, speed, transparent, useHdr) } catch (e: GlUtil.GlException) { throw VideoFrameProcessingException(e) }
 }
 
 @UnstableApi
 private class FxProgram(
     private val params: () -> FxParams, private val mask: MaskReader?,
-    private val clipStartMs: Long, private val srcInMs: Long, private val speed: Float, useHdr: Boolean,
+    private val clipStartMs: Long, private val srcInMs: Long, private val speed: Float, private val transparent: Boolean, useHdr: Boolean,
 ) : BaseGlShaderProgram(useHdr, /* texturePoolCapacity= */ 1) {
     private val blit = GlBlit()
     private val program: GlProgram? = try {
@@ -73,6 +75,7 @@ private class FxProgram(
             p.use()
             p.setSamplerTexIdUniform("uTex", inputTexId, 0)
             p.setSamplerTexIdUniform("uMask", if (bg != null) maskTex else inputTexId, 1)
+            p.setIntUniform("uTransparent", if (transparent) 1 else 0)
             p.setIntUniform("uChroma", if (ck != null) 1 else 0)
             if (ck != null) {
                 p.setFloatsUniform("uKey", rgb(ck.color)); p.setFloatUniform("uSim", ck.similarity * 0.6f)
@@ -134,6 +137,7 @@ private const val FX_FRAGMENT = """#version 300 es
 precision highp float;
 uniform sampler2D uTex;
 uniform sampler2D uMask;
+uniform int uTransparent;
 uniform int uChroma;
 uniform vec3 uKey;
 uniform float uSim;
@@ -159,6 +163,7 @@ float maskAt(vec2 uv) {
 void main() {
   vec3 col = texture(uTex, vUv).rgb;
   vec3 result = col;
+  float alphaOut = 1.0;                              // в режиме наложения убранное становится прозрачным
 
   if (uBg > 0) {
     float m = maskAt(vUv);
@@ -174,8 +179,12 @@ void main() {
         }
       }
       back = acc / wsum;
+      result = mix(back, col, m);
+    } else if (uTransparent == 1) {
+      alphaOut *= m;                                  // фон убран: прозрачность по маске
+    } else {
+      result = mix(back, col, m);
     }
-    result = mix(back, col, m);
     if (uOutline == 1) {                              // обводка: фоновые пиксели рядом с силуэтом
       float ring = 0.0;
       float r = (2.0 + uOutlineW * 10.0);
@@ -183,7 +192,9 @@ void main() {
         float a = 6.2831853 * float(i) / 12.0;
         ring = max(ring, maskAt(vUv + vec2(cos(a), sin(a)) * r * uTexel));
       }
-      result = mix(result, uOutlineColor, clamp(ring - m, 0.0, 1.0));
+      float o = clamp(ring - m, 0.0, 1.0);
+      result = mix(result, uOutlineColor, o);
+      alphaOut = max(alphaOut, o);
     }
   }
 
@@ -193,8 +204,9 @@ void main() {
     float spill = 1.0 - smoothstep(uSim, uSim + uSmooth + 0.12, d);            // подсвет цвета ключа по краю
     float luma = dot(result, vec3(0.299, 0.587, 0.114));
     vec3 clean = mix(result, vec3(luma), spill * 0.6);
-    result = mix(uChromaBg, clean, a);
+    if (uTransparent == 1) { result = clean; alphaOut *= a; }
+    else result = mix(uChromaBg, clean, a);
   }
-  outColor = vec4(result, 1.0);
+  outColor = vec4(result, alphaOut);
 }
 """

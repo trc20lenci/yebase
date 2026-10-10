@@ -123,6 +123,7 @@ fun TimelineView(
                         is Hit.TextHandle -> act.openText(h.id)
                         is Hit.CaptionHandle -> act.openCaption(h.id)
                         Hit.AudioSlot -> act.addAudio()
+                        Hit.OverlaySlot -> act.addOverlay()
                         Hit.TextSlot -> act.addText()
                         Hit.None -> act.select(null)
                     }
@@ -239,7 +240,7 @@ fun TimelineView(
 // ───────────────────────── геометрия и хит-тест ─────────────────────────
 
 /** Высота таймлайна фиксирована: экран не «прыгает» при появлении дорожек. */
-const val TL_HEIGHT_DP = 250
+const val TL_HEIGHT_DP = 270
 private enum class Mode { PENDING, SCROLL, MOVE, TRIM_START, TRIM_END, ZOOM, TRIM_T_START, TRIM_T_END, TRIM_C_START, TRIM_C_END }
 private class ThumbReq(val key: String, val uri: String, val type: MediaType, val bucketMs: Long, val h: Int)
 
@@ -252,6 +253,7 @@ private sealed interface Hit {
     class TextHandle(val id: String, val start: Boolean) : Hit
     class CaptionHandle(val id: String, val start: Boolean) : Hit
     data object AudioSlot : Hit
+    data object OverlaySlot : Hit
     data object TextSlot : Hit
     data object None : Hit
 }
@@ -263,10 +265,11 @@ class Geo(private val d: Density, val width: Float, val playheadMs: Long, val px
     fun x(t: Long) = centerX + (t - playheadMs) * pxPerMs
     private fun dp(v: Int) = with(d) { v.dp.toPx() }
     val rulerH = dp(28); val mainTop = dp(36); val mainH = dp(64)
-    val slotH = dp(40)
-    val textTop = mainTop + mainH + dp(10)            // дорожка «Текст»
-    val capTop = textTop + slotH + dp(6)              // дорожка субтитров
-    val audioTop = capTop + slotH + dp(6)             // аудио (пока заглушка)
+    val slotH = dp(36)
+    val overlayTop = mainTop + mainH + dp(8)          // наложения: фото/видео поверх основного
+    val textTop = overlayTop + slotH + dp(4)          // дорожка «Текст»
+    val capTop = textTop + slotH + dp(4)              // дорожка субтитров
+    val audioTop = capTop + slotH + dp(4)             // музыка и озвучка
     val junctionR = dp(15); val handleW = dp(14); val handleSlop = dp(14); val corner = dp(8)
     val total: Float get() = audioTop + slotH
 }
@@ -276,6 +279,7 @@ private class TlState(
     val keyframes: Map<Long, List<com.base.editor.core.Keyframe>>, val selectedId: Long?, val selectedTextId: String?, val selectedCaptionId: String?, val totalMs: Long,
 ) {
     val audioClips: List<Clip> = clips.filter { it.row != 0 && it.type == MediaType.AUDIO }.sortedBy { it.startMs }
+    val overlayClips: List<Clip> = clips.filter { it.row == 2 && it.type != MediaType.AUDIO }.sortedBy { it.startMs }
 
     /** Стыки соседних клипов основной дорожки: (левый клип, правый клип). Кнопки скрыты у выбранного клипа. */
     fun junctions(): List<Pair<Clip, Clip>> {
@@ -301,6 +305,18 @@ private class TlState(
                 }
                 if (p.x in l..r) return Hit.Body(c)
             }
+        }
+        if (p.y in g.overlayTop..(g.overlayTop + g.slotH)) {
+            overlayClips.forEach { c ->
+                val l = g.x(c.startMs); val r = g.x(c.endMs)
+                if (c.id == selectedId) {
+                    val hw = min(g.handleW, (r - l) / 4)
+                    if (p.x in (l - g.handleSlop)..(l + hw + g.handleSlop / 2)) return Hit.Handle(c, true)
+                    if (p.x in (r - hw - g.handleSlop / 2)..(r + g.handleSlop)) return Hit.Handle(c, false)
+                }
+                if (p.x in l..r) return Hit.Body(c)
+            }
+            if (p.x >= g.x(0)) return Hit.OverlaySlot
         }
         if (p.y in g.audioTop..(g.audioTop + g.slotH)) {
             audioClips.forEach { c ->
@@ -368,6 +384,7 @@ private fun DrawScope.drawTimeline(s: TlState, measurer: TextMeasurer, pending: 
     }
     slot(g.textTop, if (s.texts.isEmpty()) "+  Добавить текст" else null)
     slot(g.capTop, if (s.captions.isEmpty()) "Субтитры" else null)
+    slot(g.overlayTop, if (s.overlayClips.isEmpty()) "+  Добавить наложение (фото/видео)" else null)
     slot(g.audioTop, if (s.audioClips.isEmpty()) "+  Добавить аудио" else null)
 
     fun block(top: Float, l: Float, r: Float, color: Color, label: String) {
@@ -410,6 +427,14 @@ private fun DrawScope.drawTimeline(s: TlState, measurer: TextMeasurer, pending: 
             drawRoundRect(Color.White, Offset(l, top), Size(hw, hgt), CornerRadius(4.dp.toPx()))
             drawRoundRect(Color.White, Offset(r - hw - 2f, top), Size(hw, hgt), CornerRadius(4.dp.toPx()))
         }
+    }
+
+    // наложения: блок с именем и длительностью; выбранный — с рамкой и белыми ручками обрезки
+    s.overlayClips.forEach { c ->
+        val l = g.x(c.startMs); val r = g.x(c.endMs)
+        val name = c.uri.substringAfterLast('/').substringBeforeLast('.').ifBlank { "Наложение" }
+        block(g.overlayTop, l, r, Color(0xFF2EC4B6).copy(alpha = .55f), (if (c.type == MediaType.IMAGE) "▣ " else "▶ ") + "$name · ${Format.duration(c.lengthMs)}")
+        if (c.id == s.selectedId) handles(g.overlayTop, l, r)
     }
 
     // клипы основной дорожки
